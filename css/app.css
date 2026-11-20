@@ -40,7 +40,7 @@ html,body{margin:0;height:100%;background:#120a1a;color:#eee;font-family:system-
 #mic.on{background:#e0457b!important;box-shadow:0 0 0 0 #e0457b88;animation:ring 1.4s infinite}
 @keyframes ring{70%{box-shadow:0 0 0 12px #e0457b00}}
 /* modo voz: el chat se vuelve subtítulos */
-body.voice-mode #chat{height:var(--capH,0px);background:transparent;box-shadow:none}
+body.voice-mode #chat{display:none}
 body.voice-mode #chat header{display:none}
 body.voice-mode #msgs{background:linear-gradient(transparent,#000a 40%);justify-content:flex-end;overflow:hidden}
 body.voice-mode .m:not(:nth-last-child(-n+2)){display:none}
@@ -50,7 +50,6 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
   #chat{left:auto;right:0;top:0;bottom:var(--barH,58px);height:auto;width:var(--panelW,38%);border-radius:0;box-shadow:-8px 0 24px #0008}
   #bar{left:auto;width:var(--panelW,38%)}
   #gear{right:calc(var(--panelW,38%) + 10px)}
-  body.voice-mode #chat{width:var(--panelW,38%);top:auto;height:40%}
   body.voice-mode #bar{background:transparent}
   body.voice-mode #gear{right:10px}
 }

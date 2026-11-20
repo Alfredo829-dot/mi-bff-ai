@@ -64,21 +64,22 @@ async function groq(key, model, messages, opts={}){
     body:JSON.stringify({model,messages,temperature:opts.temperature??0.95,max_tokens:opts.max??400, ...(opts.json?{response_format:{type:'json_object'}}:{})})});
   if(!r.ok) throw new Error('groq '+r.status); const d=await r.json(); return d.choices[0].message.content;
 }
+export class Wait extends Error{ constructor(s){ super('wait'); this.wait=s; } }
 async function polli(messages, opts={}){
   const eps=['https://text.pollinations.ai/openai','https://gen.pollinations.ai/v1/chat/completions']; let err;
   for(let i=0;i<3;i++){
     const ep=eps[i%2]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),40000);
     try{ const r=await fetch(ep,{method:'POST',signal:c.signal,headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:'openai',messages,temperature:opts.temperature??1, ...(i%2?{}:{private:true})})});
-      if(r.status===429){ await new Promise(r=>setTimeout(r,3000)); continue; }
+      if(r.status===402||r.status===429){ const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); if(i%2===0) throw new Wait(mm?+mm[1]:45); continue; }
       if(!r.ok) throw new Error('polli '+r.status); const d=await r.json(); const t=d.choices?.[0]?.message?.content; if(!t) throw new Error('vacío'); return t;
-    } catch(e){ err=e; } finally{ clearTimeout(to); }
+    } catch(e){ if(e instanceof Wait) throw e; err=e; } finally{ clearTimeout(to); }
   } throw err||new Error('polli ocupado');
 }
 export async function complete(messages, opts={}){
   const key=(LS.get('bff_groq','')||'').trim(); let err;
   if(key){ for(const m of ['llama-3.3-70b-versatile','llama-3.1-8b-instant']){ try{ return {text:clean(await groq(key,m,messages,opts)), via:'Groq '+m}; }catch(e){ err=e; } } }
-  try{ return {text:clean(await polli(messages,opts)), via:'Pollinations'}; }catch(e){ err=e; }
+  try{ return {text:clean(await polli(messages,opts)), via:'Pollinations'}; }catch(e){ if(e instanceof Wait) throw e; err=e; }
   throw err||new Error('sin proveedor');
 }
 function clean(t){ return String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^\s*(Vale|Asistente)\s*:\s*/i,'').trim(); }
@@ -92,4 +93,17 @@ Valores: textos cortos; temas_gusta, temas_no_gusta y datos son listas (máx 8 e
   try{ const r=await complete(msgs,{temperature:0.2,max:500,json:true}); const j=JSON.parse(r.text.match(/\{[\s\S]*\}/)[0]);
     const merged={...prev}; for(const k of PROFILE_KEYS) if(j[k]!=null && j[k]!=='') merged[k]=Array.isArray(j[k])?j[k].slice(0,8):String(j[k]).slice(0,80);
     LS.set('bff_profile',merged); return merged; }catch(e){ return prev; }
+}
+
+export const hasGroq=()=>!!(LS.get('bff_groq','')||'').trim();
+// perfil por heurística local (sin gastar IA)
+const SWEAR=/\b(wey|güey|guey|verga|pinche|chingad\w*|chingón|cabr[oó]n\w*|pendej\w*|mam[oó]n|no mames|culer\w*|puta|put[oa]s?|alv|mierda|ching\w*)\b/gi;
+export function localProfile(text){
+  const p=LS.get('bff_profile',{}); const st=LS.get('bff_stats',{n:0,len:0,sw:0,emo:0}); st.n++; st.len+=text.length; st.sw+=(text.match(SWEAR)||[]).length; st.emo+=(text.match(/\p{Extended_Pictographic}/gu)||[]).length; LS.set('bff_stats',st);
+  const nm=text.match(/\b(?:me llamo|mi nombre es|dime|ll[aá]mame)\s+([A-ZÁÉÍÓÚÑa-záéíóúñ]{2,15})\b/i); if(nm && !/^(que|como|algo|eso|wey)$/i.test(nm[1])) p.apodo=nm[1][0].toUpperCase()+nm[1].slice(1);
+  const avg=st.len/st.n, swr=st.sw/st.n, er=st.emo/st.n;
+  p.largo_respuestas = avg<40?'corto':avg<120?'medio':'largo';
+  p.groserias = swr>0.6?'muchas':swr>0.15?'pocas':'no'; p.tono = swr>0.6?'vulgar':p.tono||'relajado';
+  p.emojis = er>0.8?'muchos':er>0.15?'pocos':'no';
+  LS.set('bff_profile',p); return p;
 }

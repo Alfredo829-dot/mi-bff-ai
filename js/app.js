@@ -1,5 +1,5 @@
 import { Renderer, Puppet, loadImage } from './rig.js';
-import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile } from './ai.js';
+import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq } from './ai.js';
 import * as V from './voice.js';
 
 const VERSION='1.0.0';
@@ -62,7 +62,7 @@ function layout(){
   const barH=$('#bar').offsetHeight; document.body.style.setProperty('--barH',barH+'px');
   let ax=0,ay=0,aw=W,ah=H-barH;
   if(land){ const pw=Math.min(400,Math.round(W*0.38)); document.body.style.setProperty('--panelW',pw+'px'); if(!voiceMode) aw=W-pw; ah=H; }
-  else { const ch=voiceMode?Math.round(H*0.2):Math.round(H*0.40); document.body.style.setProperty('--chatH',ch+'px'); document.body.style.setProperty('--capH',ch+'px'); ah=H-barH-(voiceMode?0:ch-12); }
+  else { const ch=voiceMode?0:Math.round(H*0.40); document.body.style.setProperty('--chatH',ch+'px'); document.body.style.setProperty('--capH',ch+'px'); ah=H-barH-(voiceMode?0:ch-12); }
   let k=land? Math.max(aw/ROOM.w, ah/ROOM.h) : Math.max(aw/ROOM.w, ah/500);
   cam={...cam,k,ax,ay,aw,ah};
 }
@@ -209,22 +209,36 @@ async function speakLine(text){
   talking=false; if(voiceMode) ear&&ear.resume();
 }
 let warnedSys=false;
+let pending=false, limitWarned=false;
 async function send(text){
-  text=text.trim(); if(!text||busy) return; busy=true; V.unlockAudio();
-  const um=push({role:'user',content:text}); userCount++; LS.set('bff_ucount',userCount);
-  try{
-    const g=guard(text);
-    if(g){ await sleep(500); markRead(); setTyping(true); await sleep(900); setTyping(false); await reply({text:g}); return; }
-    const q=researchQuery(text);
-    if(q){ await research(q,text); }
-    else {
-      await sleep(350); markRead(); setTyping(true); const t0=performance.now();
-      let r; try{ r=await complete(chatMsgs()); }catch(e){ r={text:pick(['Uy, se me trabó el cel 😩 ¿me lo repites?','Ay, se me fue el internet wey, dame chance y repítemelo 🙏'])}; }
-      const min=Math.min(2600,600+r.text.length*14); const left=min-(performance.now()-t0); if(left>0) await sleep(left);
-      setTyping(false); await reply(r);
-    }
-    if(userCount%4===0){ const um2=hist.filter(m=>m.role==='user').slice(-12).map(m=>m.content); updateProfile(um2); }
-  } finally { busy=false; }
+  text=text.trim(); if(!text) return; V.unlockAudio();
+  push({role:'user',content:text}); userCount++; LS.set('bff_ucount',userCount); localProfile(text);
+  if(busy){ pending=true; return; }
+  busy=true;
+  try{ await respond(); while(pending){ pending=false; await respond(); } }
+  finally{ busy=false; }
+  if(userCount%5===0 && hasGroq()){ const um2=hist.filter(m=>m.role==='user').slice(-12).map(m=>m.content); updateProfile(um2); }
+}
+const lastUser=()=>{ const u=[]; for(let i=hist.length-1;i>=0&&hist[i].role!=='assistant';i--) if(hist[i].role==='user') u.unshift(hist[i].content); return u.join('\n'); };
+async function askAI(msgs){
+  for(let i=0;i<4;i++){
+    try{ return await complete(msgs); }
+    catch(e){ if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. Con una llave gratis de Groq (⚙) contesto al instante.`}); }
+        await sleep((Math.min(60,e.wait||45)+1)*1000); continue; }
+      break; }
+  }
+  return {text:pick(['Uy, se me trabó el cel 😩 ¿me lo repites?','Ay, se me fue el internet wey, dame chance y repítemelo 🙏'])};
+}
+async function respond(){
+  const text=lastUser(); if(!text) return;
+  const g=guard(text);
+  if(g){ await sleep(500); markRead(); setTyping(true); await sleep(900); setTyping(false); await reply({text:g}); return; }
+  const q=researchQuery(text.split('\n').pop());
+  if(q){ await research(q,text); return; }
+  await sleep(350); markRead(); setTyping(true); const t0=performance.now();
+  const r=await askAI(chatMsgs());
+  const min=Math.min(2600,600+r.text.length*14); const left=min-(performance.now()-t0); if(left>0) await sleep(left);
+  setTyping(false); await reply(r);
 }
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 async function research(q,orig){
@@ -236,7 +250,7 @@ async function research(q,orig){
   const src=found.map((r,i)=>`[${i+1}] ${r.title}: ${r.text.slice(0,700)}`).join('\n\n');
   const extra = src? `\n\nACABAS DE INVESTIGAR en tu compu sobre "${q}". Resultados:\n${src}\n\nCuéntale lo que encontraste en 2 a 4 frases, en tu estilo, con datos concretos de los resultados (no inventes nada que no esté ahí). No pegues links, yo los pongo abajo.`
     : `\n\nIntentaste investigar "${q}" en internet pero no salió nada. Díselo en tu estilo y comparte lo que sepas si estás segura, aclarando que no lo checaste.`;
-  let r; try{ r=await complete(chatMsgs(extra)); }catch{ r={text: found.length? `Mira, encontré esto: ${found[0].text.slice(0,260)}…` : 'No me cargó nada, wey 😩 Intenta otra vez en un ratito.'}; }
+  let r=await askAI(chatMsgs(extra)); if(/se me trabó|se me fue el internet/.test(r.text)&&found.length) r={text:`Mira, encontré esto: ${found[0].text.slice(0,260)}…`};
   await sleep(900); setTyping(false); her.typingDesk=false;
   r.links=found.map(f=>({title:f.title,url:f.url}));
   const done=reply(r); await sleep(1600); await leaveDesk(); goSpot(prevSpot); await done;
