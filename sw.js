@@ -1,4 +1,4 @@
-const V='mibff-v2';
+const V='mibff-v3';
 const SHELL=['./','index.html','css/app.css','js/app.js','js/rig.js','js/ai.js','js/voice.js','js/vits/vits-web.js','js/vits/piper-DeOu3H9E.js','manifest.webmanifest',
 'img/cuarto.webp','img/silueta.png','img/avatar.webp','img/icon-192.png','img/stand-base.webp','img/stand-base-m.png','img/phone-base.webp','img/phone-base-m.png'];
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(V).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())); });

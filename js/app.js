@@ -160,7 +160,7 @@ let bubbleUntil=0;
 function say(text,ms){ const b=$('#bubble'); b.textContent=text; b.classList.remove('hide'); bubbleUntil=performance.now()+(ms||Math.min(9000,1800+text.length*55)); }
 function placeBubble(){
   const b=$('#bubble'); if(performance.now()>bubbleUntil){ b.classList.add('hide'); return; }
-  let X=her.x, Y=her.y-(1228-80)*scaleAt(her.y)*(1-P.sit*0.17);
+  let X=her.x, Y=her.y-(1228+25)*scaleAt(her.y)*(1-P.sit*0.17);
   if(her.desk>0.5){ X=DESK_PLACE.x+240*DESK_PLACE.s; Y=DESK_PLACE.y+60*DESK_PLACE.s; }
   const [sx,sy]=toScreen(X,Y); b.style.left=Math.max(90,Math.min(innerWidth-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
 }

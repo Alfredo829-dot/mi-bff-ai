@@ -128,7 +128,7 @@ export class Puppet {
     if(v>legTop){
       const sideB=smooth(cx-18,cx+18,u), fl=(v-legTop)/(foot-legTop);
       if(P.walk>0.001){ const ph=P.walkPhase; const sA=Math.sin(ph), sB=Math.sin(ph+Math.PI);
-        const s=sA*(1-sideB)+sB*sideB; x+=s*16*P.walk*fl; lift=-Math.max(0,s)*16*P.walk*fl*fl; }
+        const s=sA*(1-sideB)+sB*sideB; x+=s*24*P.walk*fl; lift=-Math.max(0,s)*24*P.walk*fl*fl; }
       if(P.sit>0.001){ const tt=Math.min(v,knee)-legTop, rest=Math.max(0,v-knee); const yy=legTop+tt*(1-0.66*P.sit)+rest; lift+=(yy-v);
         // rodillas un poco abiertas y pies juntos al sentarse
         const side=sideB*2-1; x+=side*P.sit*6*smooth(legTop,knee,v)*(1-smooth(knee,foot,v)*0.6); }
