@@ -19,11 +19,17 @@ const EARS=[['jade',null,'#4f9a6c'],['oro',[0.12,1.3,1.3],'#d4a72c'],['plata',[0
 const L_STAND={kind:'body',cx:262,neckY:245,shoulderY:290,waistY:480,legTop:650,kneeY:917,footY:1228,armL:[140,188],armR:[342,388],handY:715,
   eyes:[[241,137],[298,154]],eyeR:[15,10],eyeAng:0.29,mouth:[262,191],mouthW:16,cheek:[230,160]};
 const L_PHONE={...L_STAND,armL:null,armR:null,thumbs:[318,330],eyes:[[241,137],[294,153]],mouth:[261,189]};
+const L_SIT={kind:'body',cx:205,neckY:228,shoulderY:275,waistY:410,legTop:647,kneeY:647,footY:1114,armL:null,armR:null,handY:0,
+  eyes:[[194,124],[246,139]],eyeR:[14,9],eyeAng:0.265,mouth:[214,173],mouthW:16,cheek:[187,150]};
+const L_SITPHONE={...L_SIT,thumbs:[285,315]};
 const L_DESK={kind:'desk',neckY:189,neck:[243,189],headX0:150,hands:[418,424]};
-const SPOT={idle:{x:600,y:648},bed:{x:300,y:600},closet:{x:650,y:528},desk:{x:770,y:612}};
+const SPOT={idle:{x:590,y:648},bed:{x:300,y:612},closet:{x:650,y:540},desk:{x:740,y:630}};
 const DESK_PLACE={x:792,y:223,s:0.435};
 const HOT={bed:[0,300,425,620],closet:[525,103,776,470],pc:[787,240,1168,640]};
-const scaleAt=y=>0.29*(y-300)/(640-300);
+const scaleAt=y=>0.40*(y-260)/(648-260);
+const herH=()=>1228*scaleAt(her.y)*(1-P.sit*0.22);
+const SIT_RATIO=0.78; // sentada mide ~78% de su altura de pie
+const sitScale=y=>1228*scaleAt(y)*SIT_RATIO/1100;
 
 // ---------- estado ----------
 let cfg=Object.assign({name:'Vale',voice:'es_MX-claude-high',readAloud:false,dev:false,persona:''},LS.get('bff_cfg',{}));
@@ -36,14 +42,14 @@ const her={x:SPOT.idle.x,y:SPOT.idle.y,spot:'idle',mode:'stand',sit:0,sitT:0,pho
 const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,walk:0,walkPhase:0,sit:0,typing:0,open:0};
 const G={tilt:0,nod:0,armL:0,armR:0,turn:0}; let gestT=0;
 let talking=false, fakeTalkUntil=0, herTyping=false, userTyping=0, voiceMode=false, busy=false, lastPoke=0;
-let cam={k:1,cx:600,cy:470,ax:0,ay:0,aw:1,ah:1}, camX=SPOT.idle.x;
+let cam={k:1,cx:600,cy:470,ax:0,ay:0,aw:1,ah:1}, camX=SPOT.idle.x, camY=420;
 
 // ---------- carga ----------
 const prog=p=>{ $('#loader .lbar i').style.width=Math.round(p*100)+'%'; };
 async function loadOutfit(id, withDesk=false){
-  const need=[['stand',L_STAND],['phone',L_PHONE]]; if(withDesk) need.push(['desk',L_DESK]);
+  const need=[['stand',L_STAND],['phone',L_PHONE]]; if(withDesk) need.push(['sit',L_SIT],['sitphone',L_SITPHONE],['desk',L_DESK]);
   for(const [k,L] of need){ const key=k+'-'+id; if(pup[key]) continue;
-    const [im,mk]=await Promise.all([loadImage(`img/${key}.webp`),loadImage(`img/${key}-m.png`)]); pup[key]=new Puppet(R,im,mk,L, k==='desk'?14:18, k==='desk'?20:44); }
+    const [im,mk]=await Promise.all([loadImage(`img/${key}.webp`),loadImage(`img/${key}-m.png`)]); pup[key]=new Puppet(R,im,mk,L, k==='desk'?14:18, k==='desk'?20:(k.startsWith('sit')?40:44)); }
 }
 async function boot(){
   try{
@@ -63,7 +69,7 @@ function layout(){
   let ax=0,ay=0,aw=W,ah=H-barH;
   if(land){ const pw=Math.min(400,Math.round(W*0.38)); document.body.style.setProperty('--panelW',pw+'px'); if(!voiceMode) aw=W-pw; ah=H; }
   else { const ch=voiceMode?0:Math.round(H*0.40); document.body.style.setProperty('--chatH',ch+'px'); document.body.style.setProperty('--capH',ch+'px'); ah=H-barH-(voiceMode?0:ch-12); }
-  let k=land? Math.max(aw/ROOM.w, ah/ROOM.h) : Math.max(aw/ROOM.w, ah/500);
+  let k=land? Math.max(aw/ROOM.w, ah/ROOM.h) : Math.max(aw/ROOM.w, ah/(voiceMode?560:620));
   cam={...cam,k,ax,ay,aw,ah};
 }
 function updateCam(dt){
@@ -71,7 +77,7 @@ function updateCam(dt){
   const target = her.desk>0.5? 900 : her.x;
   camX+=(target-camX)*Math.min(1,dt*2.2);
   cam.cx=Math.min(Math.max(camX,halfW),ROOM.w-halfW); if(halfW*2>=ROOM.w) cam.cx=ROOM.w/2;
-  const wantY=voiceMode? 450: 430; cam.cy=Math.min(Math.max(wantY,halfH),ROOM.h-halfH); if(halfH*2>=ROOM.h) cam.cy=ROOM.h/2;
+  const wantY= her.desk>0.5? 430 : her.y-herH()*0.5-14; camY+=(wantY-camY)*Math.min(1,dt*2.2); cam.cy=Math.min(Math.max(camY,halfH),ROOM.h-halfH); if(halfH*2>=ROOM.h) cam.cy=ROOM.h/2;
 }
 const toScreen=(X,Y)=>[(X-cam.cx)*cam.k+cam.ax+cam.aw/2,(Y-cam.cy)*cam.k+cam.ay+cam.ah/2];
 const toRoom=(sx,sy)=>[(sx-cam.ax-cam.aw/2)/cam.k+cam.cx,(sy-cam.ay-cam.ah/2)/cam.k+cam.cy];
@@ -107,7 +113,7 @@ function frame(now){
   her.phone=lerp(her.phone,her.phoneT,dt*5); if(Math.abs(her.phone-her.phoneT)<0.01) her.phone=her.phoneT;
   P.typing=lerp(P.typing,(herTyping&&her.phone>0.6)||(her.mode==='desk'&&her.typingDesk)?1:0,dt*6);
   // sentarse
-  her.sit=lerp(her.sit,her.sitT,dt*4.5); if(Math.abs(her.sit-her.sitT)<0.005) her.sit=her.sitT; P.sit=ease(her.sit);
+  her.sit=lerp(her.sit,her.sitT,dt*3.2); if(Math.abs(her.sit-her.sitT)<0.005) her.sit=her.sitT; P.sit=ease(her.sit);
   her.desk=lerp(her.desk,her.deskT,dt*5); if(Math.abs(her.desk-her.deskT)<0.01) her.desk=her.deskT;
   her.hop=Math.max(0,her.hop-dt*2.2);
   if(her.walking){ P.walk=lerp(P.walk,1,dt*8); P.walkPhase+=dt*9.5; } else { P.walk=lerp(P.walk,0,dt*8); }
@@ -122,15 +128,23 @@ function draw(){
   R.clear(); const glow= her.desk>0.3? [0.83,0.38,0.12+0.01*Math.sin(T*20),0.09] : null;
   R.drawBg(bgTex,ROOM.w,ROOM.h,cam,1,glow);
   const lu=lookUniforms(); const s=scaleAt(her.y);
-  const bob = her.walking? -Math.abs(Math.sin(P.walkPhase))*5*s/0.29 : 0;
-  const hop = -Math.sin(her.hop*Math.PI)*14*(her.hop>0?1:0);
+  const bob = her.walking? -Math.abs(Math.sin(P.walkPhase))*6*s/0.29 : 0;
+  const hop = -Math.sin(her.hop*Math.PI)*14*s/0.29*(her.hop>0?1:0);
   const bodyA=1-her.desk;
   if(bodyA>0.01){
     R.drawShadow(her.x,her.y+2,170*s/0.29*(1-P.sit*0.1),26*s/0.29,cam,bodyA);
     const place={x:her.x,y:her.y+bob+hop,s,sx:her.squash*(her.flip||1)};
+    const sitW=Math.min(1,Math.max(0,(P.sit-0.3)/0.4)); const f=her.phone;
+    // de pie (se inclina un poco al sentarse) y pose real sentada con fundido
+    const Ps={...P,sit:Math.min(P.sit,0.45)*0.6};
     const a=pup['stand-'+look.outfit], b=pup['phone-'+look.outfit];
-    const f=her.phone; if(a&&f<0.999) a.draw(P,T,place,cam,bodyA*(f>0? 1:1),lu);
-    if(b&&f>0.001) b.draw(P,T,place,cam,bodyA*f,lu);
+    const standA=bodyA*(1-sitW);
+    if(standA>0.003){ if(a&&f<0.999) a.draw(Ps,T,place,cam,standA,lu); if(b&&f>0.001) b.draw(Ps,T,place,cam,standA*f,lu); }
+    const sa=pup['sit-'+look.outfit], sb=pup['sitphone-'+look.outfit];
+    const sitA=bodyA*sitW;
+    if(sitA>0.003 && sa){ const Pq={...P,sit:0,walk:0,hip:P.hip*0.25,lean:P.lean*0.5}; const sp={x:her.x,y:her.y+hop*0.3,s:sitScale(her.y),sx:her.squash*(her.flip||1)};
+      if(f<0.999) sa.draw(Pq,T,sp,cam,sitA,lu); if(sb&&f>0.001) sb.draw(Pq,T,sp,cam,sitA*f,lu); }
+    else if(sitA>0.003){ if(a) a.draw(P,T,place,cam,sitA,lu); }
   }
   const d=pup['desk-'+look.outfit]; if(d&&her.desk>0.01) d.draw(P,T,DESK_PLACE,cam,her.desk,lu);
 }
@@ -140,14 +154,14 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function walkTo(x,y){
   if(her.sitT>0){ her.sitT=0; await sleep(450); }
   const dx=x-her.x, dy=y-her.y, dist=Math.hypot(dx,dy); if(dist<6) return;
-  her.dir=Math.sign(dx)||1; her.walking=true; const sp=230, dur=dist/sp*1000, x0=her.x,y0=her.y, t0=performance.now();
+  her.dir=Math.sign(dx)||1; her.walking=true; const sp=300, dur=dist/sp*1000, x0=her.x,y0=her.y, t0=performance.now();
   await new Promise(res=>{ const st=()=>{ const k=Math.min(1,(performance.now()-t0)/dur); const e=k<.15? k*k/.15/2 : k; her.x=x0+dx*Math.min(1,e); her.y=y0+dy*Math.min(1,e); P.lean=her.dir*0.04; if(k<1) requestAnimationFrame(st); else res(); }; st(); });
   her.walking=false;
 }
 async function goSpot(name){
   if(her.mode==='desk') await leaveDesk();
   const s=SPOT[name]; await walkTo(s.x,s.y); her.spot=name;
-  if(name==='bed'){ her.sitT=1; her.mode='sit'; } else her.mode='stand';
+  if(name==='bed'){ await loadOutfit(look.outfit,true).catch(()=>{}); her.sitT=1; her.mode='sit'; } else her.mode='stand';
 }
 async function goDesk(){
   if(her.mode==='desk') return; await walkTo(SPOT.desk.x,SPOT.desk.y);
@@ -160,7 +174,7 @@ let bubbleUntil=0;
 function say(text,ms){ const b=$('#bubble'); b.textContent=text; b.classList.remove('hide'); bubbleUntil=performance.now()+(ms||Math.min(9000,1800+text.length*55)); }
 function placeBubble(){
   const b=$('#bubble'); if(performance.now()>bubbleUntil){ b.classList.add('hide'); return; }
-  let X=her.x, Y=her.y-(1228+25)*scaleAt(her.y)*(1-P.sit*0.17);
+  let X=her.x, Y=her.y-herH()-20*scaleAt(her.y);
   if(her.desk>0.5){ X=DESK_PLACE.x+240*DESK_PLACE.s; Y=DESK_PLACE.y+60*DESK_PLACE.s; }
   const [sx,sy]=toScreen(X,Y); b.style.left=Math.max(90,Math.min(innerWidth-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
 }
@@ -278,7 +292,7 @@ $('#gl').addEventListener('click',e=>{
   V.unlockAudio(); if(busy&&her.mode==='desk') return;
   const [X,Y]=toRoom(e.clientX,e.clientY);
   // ¿la tocó a ella?
-  const s=scaleAt(her.y), hh=1228*s*(1-P.sit*0.17), hw=200*s;
+  const s=scaleAt(her.y), hh=herH(), hw=200*s;
   if(her.desk<0.5 && Math.abs(X-her.x)<hw && Y<her.y && Y>her.y-hh){ return poke(); }
   const inR=(r)=>X>=r[0]&&X<=r[2]&&Y>=r[1]&&Y<=r[3];
   if(inR(HOT.closet)) return openCloset(true);
