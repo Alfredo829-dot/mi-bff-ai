@@ -176,7 +176,7 @@ export async function complete(messages, opts={}){
   catch(e){ if(e instanceof Wait){ e.errs=errs; if(!refusals) throw e; } else if(!refusals){ e.errs=errs; throw e; } }
   return {text:'', refused:true, via:'respaldo', errs};
 }
-function clean(t){ return String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^\s*(Vale|Asistente)\s*:\s*/i,'').trim(); }
+function clean(t){ return String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/__([^_]+)__/g,'$1').replace(/^#{1,4}\s+/gm,'').replace(/^\s*(Vale|Asistente)\s*:\s*/i,'').trim(); }
 
 // ---------- perfil implícito ----------
 export async function updateProfile(userMsgs){
