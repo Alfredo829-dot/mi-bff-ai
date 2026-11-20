@@ -1,8 +1,8 @@
 import { Renderer, Puppet, loadImage } from './rig.js';
-import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq } from './ai.js';
+import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, groqErrText, groqModels } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.0.0';
+const VERSION='1.0.1';
 const $=s=>document.querySelector(s);
 const ROOM={w:1168,h:784};
 // ---------- catálogo (agregar más outfits aquí) ----------
@@ -186,7 +186,7 @@ function bubbleEl(m){
   const d=document.createElement('div'); d.className='m '+(m.role==='user'?'me':m.role==='sys'?'sys':'her');
   d.innerHTML=esc(m.content).replace(/(https?:\/\/[^\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
   if(m.links&&m.links.length){ const s=document.createElement('div'); s.className='src'; for(const l of m.links){ const a=document.createElement('a'); a.href=l.url; a.target='_blank'; a.rel='noopener'; a.textContent='🔗 '+l.title; s.appendChild(a);} d.appendChild(s); }
-  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=hhmm(m.ts)+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
+  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=(m.role==='assistant'&&m.via?`<span class="via ${m.via}">${m.via==='groq'?'⚡ Groq':'respaldo'}</span> `:'')+hhmm(m.ts)+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
   m._el=d; return d;
 }
 function render(){ const box=$('#msgs'); box.innerHTML=''; for(const m of hist.slice(-60)) box.appendChild(bubbleEl(m)); box.scrollTop=box.scrollHeight; }
@@ -209,7 +209,7 @@ function chatMsgs(extra){ const h=hist.filter(m=>m.role==='user'||m.role==='assi
 let userCount=LS.get('bff_ucount',0);
 async function reply(m){
   // muestra respuesta, voz, gestos
-  const msg=push({role:'assistant',content:m.text,links:m.links});
+  const msg=push({role:'assistant',content:m.text,links:m.links,via:m.via});
   her.hop=0.6; 
   if(voiceMode||cfg.readAloud) await speakLine(m.text); else { her.phoneHold=T+6; }
   return msg;
@@ -234,10 +234,12 @@ async function send(text){
   if(userCount%5===0 && hasGroq()){ const um2=hist.filter(m=>m.role==='user').slice(-12).map(m=>m.content); updateProfile(um2); }
 }
 const lastUser=()=>{ const u=[]; for(let i=hist.length-1;i>=0&&hist[i].role!=='assistant';i--) if(hist[i].role==='user') u.unshift(hist[i].content); return u.join('\n'); };
+let groqWarned='';
+function warnGroq(e){ if(!e){ groqWarned=''; return; } const k=String(e.status); if(groqWarned===k) return; groqWarned=k; push({role:'sys',content:'⚠️ '+groqErrText(e)}); }
 async function askAI(msgs){
   for(let i=0;i<4;i++){
-    try{ return await complete(msgs); }
-    catch(e){ if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. Con una llave gratis de Groq (⚙) contesto al instante.`}); }
+    try{ const r=await complete(msgs); warnGroq(r.groqErr); return r; }
+    catch(e){ warnGroq(e.groqErr); if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis de Groq (⚙) contesto al instante.'}`}); }
         await sleep((Math.min(60,e.wait||45)+1)*1000); continue; }
       break; }
   }
@@ -364,7 +366,7 @@ async function openSettings(){
      <p class="note" id="vNote">${ready?'✅ Voz natural ya descargada (funciona sin internet).':'La voz natural se descarga una vez (~63 MB) y luego funciona sin internet.'}</p>
      ${ready?'':'<button class="btn" id="sDl">⬇️ Descargar voz natural</button><div class="prog"><i id="sProg"></i></div>'}</div>
    <div class="row sw-row"><label style="margin:0">Leer en voz alta también en modo texto</label><input type="checkbox" id="sRead" ${cfg.readAloud?'checked':''}></div>
-   <div class="row"><label>Llave de Groq (opcional, respuestas más rápidas y listas)</label><input type="password" id="sKey" placeholder="gsk_…" value="${key?'••••••••':''}"><p class="note">Sin llave usa un servicio gratis sin registro. Saca una gratis en console.groq.com. Se guarda solo en este cel.</p></div>
+   <div class="row"><label>Llave de Groq (opcional, respuestas más rápidas y listas)</label><input type="password" id="sKey" placeholder="gsk_…" autocomplete="off" autocapitalize="off" spellcheck="false" value="${key?'••••••••':''}"><p class="note" id="kStat">${key?'Llave guardada. Probando…':''}</p><p class="note">Sin llave usa un servicio gratis sin registro. Saca una gratis en console.groq.com. Se guarda solo en este cel.</p></div>
    <div class="row"><button class="btn red" id="sReset">🔄 Reiniciar amistad</button><p class="note">Borra la plática y lo que ${esc(cfg.name)} sabe de ti. Todo se guarda solo en este dispositivo.</p></div>
    <div class="row sw-row"><label style="margin:0">Modo desarrollador</label><input type="checkbox" id="sDev" ${cfg.dev?'checked':''}></div>
    <div class="row" id="devBox" style="display:${cfg.dev?'block':'none'}"><label>Personalidad (solo dev)</label><textarea id="sPersona" placeholder="Vacío = personalidad normal">${esc(cfg.persona||'')}</textarea></div>
@@ -372,7 +374,16 @@ async function openSettings(){
     el.querySelector('#sName').onchange=e=>{ cfg.name=e.target.value.trim()||'Vale'; saveCfg(); $('#cname').textContent=cfg.name; };
     el.querySelector('#sVoice').onchange=e=>{ cfg.voice=e.target.value; saveCfg(); };
     el.querySelector('#sRead').onchange=e=>{ cfg.readAloud=e.target.checked; saveCfg(); V.unlockAudio(); };
-    el.querySelector('#sKey').onchange=e=>{ const v=e.target.value.trim(); if(v.startsWith('••')) return; LS.set('bff_groq',v); e.target.value=v?'••••••••':''; };
+    const kIn=el.querySelector('#sKey'), kSt=el.querySelector('#kStat'); let kT=0, kN=0;
+    const testKey=async()=>{ const k=cleanKey(LS.get('bff_groq','')); const n=++kN; if(!k){ kSt.textContent='Sin llave: uso el respaldo gratis.'; return; }
+      kSt.textContent='Probando llave…'; try{ const ms=await groqModels(k); if(n!==kN) return; kSt.textContent=ms.length?`✅ Groq conectado (${ms[0]}). Ya contesto con Groq.`:'⚠️ La llave sirve pero Groq no ofrece modelos de chat.'; }
+      catch(e){ if(n!==kN) return; kSt.textContent='❌ '+groqErrText(e); } };
+    const saveKey=()=>{ const raw=kIn.value; if(raw.startsWith('••')) return; const v=cleanKey(raw); if(v) LS.set('bff_groq',v); else LS.del('bff_groq'); LS.del('bff_groq_models'); groqWarned=''; testKey(); };
+    kIn.onfocus=()=>{ if(kIn.value.startsWith('••')) kIn.value=''; };
+    kIn.oninput=()=>{ clearTimeout(kT); kT=setTimeout(saveKey,350); };
+    kIn.onchange=()=>{ clearTimeout(kT); saveKey(); };
+    kIn.onblur=()=>{ if(!kIn.value&&hasGroq()) kIn.value='••••••••'; };
+    if(key) testKey();
     el.querySelector('#sDev').onchange=e=>{ cfg.dev=e.target.checked; saveCfg(); el.querySelector('#devBox').style.display=cfg.dev?'block':'none'; };
     el.querySelector('#sPersona').onchange=e=>{ cfg.persona=e.target.value; saveCfg(); };
     const dl=el.querySelector('#sDl'); if(dl) dl.onclick=()=>{ dl.disabled=true; dl.textContent='Descargando…'; downloadVoice(p=>{ const i=el.querySelector('#sProg'); if(i) i.style.width=Math.round(p*100)+'%'; }).then(()=>{ dl.textContent='✅ Lista'; }); };

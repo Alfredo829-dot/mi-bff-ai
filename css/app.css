@@ -74,3 +74,5 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
 .btn.pink{background:linear-gradient(90deg,#ff7ac6,#b98cff);color:#1a0f24;font-weight:700}.btn.red{background:#5a1a2a;color:#ffb3c4}
 .sw-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .prog{height:6px;background:#ffffff1a;border-radius:6px;overflow:hidden;margin-top:6px}.prog i{display:block;height:100%;width:0;background:#ff7ac6}
+
+.m .meta .via{font-size:10px;opacity:.8;margin-right:4px}.m .meta .via.respaldo{color:#ffd27a}.m .meta .via.groq{color:#9ff0b0}

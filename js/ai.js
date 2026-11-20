@@ -59,10 +59,38 @@ export async function webSearch(q){
 }
 
 // ---------- proveedores ----------
-async function groq(key, model, messages, opts={}){
-  const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body:JSON.stringify({model,messages,temperature:opts.temperature??0.95,max_tokens:opts.max??400, ...(opts.json?{response_format:{type:'json_object'}}:{})})});
-  if(!r.ok) throw new Error('groq '+r.status); const d=await r.json(); return d.choices[0].message.content;
+// Groq: los llama-3.x se apagaron en el plan gratis el 16/08/2026 -> gpt-oss. Si un modelo ya no existe, se consulta /models.
+export const cleanKey=k=>String(k||'').replace(/[\s\u200B-\u200D\uFEFF"'`]/g,'').replace(/^Bearer/i,'');
+const GROQ_PREF=['openai/gpt-oss-120b','openai/gpt-oss-20b','moonshotai/kimi-k2-instruct','meta-llama/llama-4-maverick-17b-128e-instruct','llama-3.3-70b-versatile','llama-3.1-8b-instant'];
+export class GroqErr extends Error{ constructor(status,msg){ super(msg); this.status=status; } }
+export function groqErrText(e){ const s=e?.status;
+  if(s===401||s===403) return 'Groq rechazó tu llave (inválida o revocada). Revísala en ⚙.';
+  if(s===429) return 'Llegaste al límite gratis de Groq por ahora; mientras, contesto con el respaldo.';
+  if(s===404||s===400) return 'Groq no aceptó el modelo ('+(e.message||'')+'); uso el respaldo.';
+  if(s===0) return 'No pude conectar con Groq (internet o bloqueo). Uso el respaldo.';
+  return 'Groq falló ('+(s||'?')+'): '+(e?.message||'')+'. Uso el respaldo.'; }
+async function groqCall(key, model, messages, opts={}){
+  let r; try{ r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model,messages,temperature:opts.temperature??0.95,max_completion_tokens:/gpt-oss/.test(model)?(opts.max??400)+700:(opts.max??400),
+      ...(/gpt-oss/.test(model)?{reasoning_effort:'low'}:{}), ...(opts.json?{response_format:{type:'json_object'}}:{})})}); }
+  catch(e){ throw new GroqErr(0,'red'); }
+  if(!r.ok){ const j=await r.json().catch(()=>({})); throw new GroqErr(r.status, String(j?.error?.code||j?.error?.message||r.status).slice(0,80)); }
+  const d=await r.json(); const t=d.choices?.[0]?.message?.content; if(!t) throw new GroqErr(500,'respuesta vacía'); return t;
+}
+export async function groqModels(key){
+  const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{'Authorization':'Bearer '+key}}).catch(()=>{ throw new GroqErr(0,'red'); });
+  if(!r.ok){ const j=await r.json().catch(()=>({})); throw new GroqErr(r.status,String(j?.error?.code||r.status)); }
+  const ids=((await r.json()).data||[]).filter(m=>m.active!==false).map(m=>m.id).filter(id=>!/whisper|tts|guard|orpheus|compound|safeguard|prompt-guard|distil/i.test(id));
+  const pick=[...GROQ_PREF.filter(m=>ids.includes(m)), ...ids.filter(m=>!GROQ_PREF.includes(m))];
+  LS.set('bff_groq_models',{t:Date.now(),list:pick.slice(0,4)}); return pick;
+}
+async function groq(key, messages, opts={}){
+  const cached=LS.get('bff_groq_models',null); let list=(cached&&Date.now()-cached.t<864e5)?cached.list:GROQ_PREF.slice(0,2); let last;
+  for(let pass=0;pass<2;pass++){
+    for(const m of list){ try{ return {text:await groqCall(key,m,messages,opts), model:m}; }
+      catch(e){ last=e; if(e.status===401||e.status===403||e.status===429||e.status===0) throw e; } }
+    if(pass===0){ list=(await groqModels(key)).slice(0,3); if(!list.length) break; }
+  } throw last||new GroqErr(404,'sin modelos');
 }
 export class Wait extends Error{ constructor(s){ super('wait'); this.wait=s; } }
 async function polli(messages, opts={}){
@@ -76,11 +104,13 @@ async function polli(messages, opts={}){
     } catch(e){ if(e instanceof Wait) throw e; err=e; } finally{ clearTimeout(to); }
   } throw err||new Error('polli ocupado');
 }
+export let lastGroqError=null;
 export async function complete(messages, opts={}){
-  const key=(LS.get('bff_groq','')||'').trim(); let err;
-  if(key){ for(const m of ['llama-3.3-70b-versatile','llama-3.1-8b-instant']){ try{ return {text:clean(await groq(key,m,messages,opts)), via:'Groq '+m}; }catch(e){ err=e; } } }
-  try{ return {text:clean(await polli(messages,opts)), via:'Pollinations'}; }catch(e){ if(e instanceof Wait) throw e; err=e; }
-  throw err||new Error('sin proveedor');
+  const key=cleanKey(LS.get('bff_groq','')); let err, gerr=null;
+  if(key){ try{ const r=await groq(key,messages,opts); lastGroqError=null; return {text:clean(r.text), via:'groq', model:r.model}; }
+    catch(e){ gerr=e; lastGroqError=e; console.warn('Groq', e.status, e.message); } }
+  try{ return {text:clean(await polli(messages,opts)), via:'respaldo', groqErr:gerr}; }catch(e){ if(e instanceof Wait){ e.groqErr=gerr; throw e; } err=e; }
+  const x=err||new Error('sin proveedor'); x.groqErr=gerr; throw x;
 }
 function clean(t){ return String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^\s*(Vale|Asistente)\s*:\s*/i,'').trim(); }
 
@@ -95,7 +125,7 @@ Valores: textos cortos; temas_gusta, temas_no_gusta y datos son listas (máx 8 e
     LS.set('bff_profile',merged); return merged; }catch(e){ return prev; }
 }
 
-export const hasGroq=()=>!!(LS.get('bff_groq','')||'').trim();
+export const hasGroq=()=>!!cleanKey(LS.get('bff_groq',''));
 // perfil por heurística local (sin gastar IA)
 const SWEAR=/\b(wey|güey|guey|verga|pinche|chingad\w*|chingón|cabr[oó]n\w*|pendej\w*|mam[oó]n|no mames|culer\w*|puta|put[oa]s?|alv|mierda|ching\w*)\b/gi;
 export function localProfile(text){
