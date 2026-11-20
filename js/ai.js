@@ -119,7 +119,7 @@ async function call(prov, key, model, messages, opts={}){
       r=await fetch(`${P.base}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
     }
   }catch(e){ throw new ProvErr(prov,0,'red'); }
-  if(!r.ok){ const j=await r.json().catch(()=>({})); const er=Array.isArray(j)?j[0]?.error:j?.error; throw new ProvErr(prov,r.status,String(er?.code||er?.status||er?.message||j?.message||r.status).slice(0,80)); }
+  if(!r.ok){ const j=await r.json().catch(()=>({})); const er=Array.isArray(j)?j[0]?.error:j?.error; const msg=JSON.stringify(j); throw new ProvErr(prov,/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(msg)?401:r.status,String(er?.code||er?.status||er?.message||j?.message||r.status).slice(0,80)); }
   const d=await r.json();
   const t= prov==='gemini' ? (d.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('') : d.choices?.[0]?.message?.content;
   if(!t){ const why=d.promptFeedback?.blockReason||d.candidates?.[0]?.finishReason||'vacía'; const e=new ProvErr(prov,200,'respuesta '+why); e.refusal=true; throw e; }
@@ -129,7 +129,7 @@ export async function listModels(prov,key){
   const P=PROVIDERS[prov]; let r;
   try{ r= prov==='gemini'? await fetch(`${P.base}/models?pageSize=200`,{headers:{'x-goog-api-key':key}}) : await fetch(`${P.base}/models`,{headers:{'Authorization':'Bearer '+key}}); }
   catch(e){ throw new ProvErr(prov,0,'red'); }
-  if(!r.ok){ const j=await r.json().catch(()=>({})); throw new ProvErr(prov,r.status,String(j?.error?.code||j?.error?.status||r.status)); }
+  if(!r.ok){ const j=await r.json().catch(()=>({})); const msg=JSON.stringify(j); throw new ProvErr(prov,/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(msg)?401:r.status,String(j?.error?.code||j?.error?.status||r.status)); }
   const d=await r.json();
   let ids= prov==='gemini' ? (d.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace(/^models\//,'')).filter(id=>/flash|pro/.test(id)&&!/image|tts|audio|live|embed|vision/.test(id))
     : (d.data||[]).filter(m=>m.active!==false).map(m=>m.id).filter(id=>!/whisper|tts|guard|orpheus|compound|safeguard|embed|moderation|ocr|codestral|pixtral|voxtral|devstral/i.test(id));
