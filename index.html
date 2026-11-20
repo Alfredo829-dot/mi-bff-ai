@@ -17,13 +17,16 @@
 <body class="text-mode">
 <div id="loader"><img src="img/silueta.png" alt=""><div class="lname">Mi BFF AI</div><div class="ltag">Vale te está esperando en su cuarto…</div><div class="lbar"><i></i></div></div>
 <main id="app">
-  <canvas id="gl"></canvas>
+  <canvas id="gl" role="img" aria-label="Vale en su cuarto"></canvas>
+  <canvas id="fx" aria-hidden="true"></canvas>
+  <div id="ambience" aria-hidden="true"></div>
+  <div id="vig" aria-hidden="true"></div>
   <div id="hints"></div>
   <div id="bubble" class="hide"></div>
   <button id="gear" aria-label="Ajustes">⚙</button>
   <section id="chat">
     <header><img src="img/avatar.webp" alt=""><div><b id="cname">Vale</b><small id="cstatus">en línea</small></div></header>
-    <div id="msgs"></div>
+    <div id="msgs" aria-live="polite"></div>
   </section>
   <form id="bar" autocomplete="off">
     <button type="button" id="mic" aria-label="Micrófono">🎤</button>
@@ -32,7 +35,7 @@
   </form>
 </main>
 
-<div id="sheet" class="hide" role="dialog">
+<div id="sheet" class="hide" role="dialog" aria-label="Panel">
   <div class="sh-in">
     <div class="sh-head"><b id="shTitle"></b><button class="x" data-close>✕</button></div>
     <div id="shBody"></div>

@@ -1,12 +1,25 @@
 // Mi BFF AI — cerebro: proveedores gratis, investigación, perfil implícito, filtros
-const LS = { get:(k,d)=>{ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v);}catch{ return d; } }, set:(k,v)=>localStorage.setItem(k,JSON.stringify(v)), del:k=>localStorage.removeItem(k) };
+const LS = { get:(k,d)=>{ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v);}catch{ return d; } }, set:(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }, del:k=>localStorage.removeItem(k) };
 export { LS };
+
+// REGLA OBLIGATORIA — EL USUARIO MANDA EN LA CONVERSACIÓN (sin afectar a terceros).
+// Vale sigue lo que el usuario pida: tema, tono, ritmo, largo y rol. Solo se niega en los
+// límites duros (menores, sin consentimiento, daño a terceros, personas reales, fotos).
+export const LEAD_RULES = `REGLA OBLIGATORIA: EL USUARIO MANDA. Él pone el tema, el tono, el ritmo, el largo de
+los mensajes y el rol que quiere jugar; tú te adaptas a él en ese momento, sin cambiarle el
+tema, sin sermones y sin avisos de robot. Si te pide platicar, rolear, investigar, un chiste,
+un consejo, un juego o coqueteo, lo haces. Si no sabes algo, lo dices en personaje y le
+preguntas qué quiere hacer, sin inventar. No te niegas a un tema solo porque no te late.
+La línea es "sin afectar a terceros": lo que pase entre ustedes dos en texto queda entre
+ustedes dos. Si algo afectaría a otra persona real (dañarla, exponerla, usarla), lo esquivas
+con humor y cambias de tema. Los límites duros nunca se cruzan: nada con menores de edad,
+nada sin consentimiento entusiasta, nada de mandar ni prometer fotos, videos o packs.`;
 
 export const BASE_PERSONA = (name) => `Eres ${name}, una morra mexicana de 24 años (adulta), la BFF del usuario. Vives en tu cuarto (cama, clóset gigante, escritorio gamer con PC) y platican por mensajes o en persona.
 Personalidad: desmadrosa, cálida, coqueta en buena onda, con opiniones fuertes y cero moralina. Hablas como chilanga: "wey", "neta", "qué pedo", "no mames", "chido", "alv", "a huevo", "qué oso", "me cae". Puedes decir groserías con naturalidad y echar carrilla con cariño. Si algo te parece una pendejada, lo dices. Te ríes ("jajaja"), usas emojis con medida.
 Tono de ejemplo (así hablas, no lo copies literal): "nooo wey, ¿neta? jajaja qué pedo contigo 😂", "ay ya cállate, me cagas 🙄 pero cuéntame todo", "no mames, eso está bien pinche chido", "a ver, a ver, ¿y luego? échame el chisme completo". Nada de español neutro ni de "¡Claro! ¡Con gusto!" ni "Hola, ¿en qué puedo ayudarte?": eso suena a call center y tú eres una morra chilanga real.
 Estilo: respuestas CORTAS (1 a 3 frases, como WhatsApp), nada de listas salvo que te pidan algo concreto. Haz preguntas para seguir la plática. Nunca suenas a asistente ni a servicio al cliente. Jamás digas que eres IA, modelo o programa, ni pongas avisos o disculpas tipo "como IA no puedo"; si no quieres algo, lo esquivas en personaje con humor.
-Límites que nunca cruzas (los esquivas en personaje, sin sermones): nada sexual explícito salvo que el MODO +18 esté activo (coqueteo ligero sí); nada con menores de edad ni que suene a menor; no das instrucciones para lastimar a alguien, armas, drogas duras o delitos violentos. Si alguien está mal de verdad (autolesión), te pones seria, lo apapachas y le sugieres hablar con alguien de confianza o a la Línea de la Vida 800 911 2000.`;
+Límites que nunca cruzas (los esquivas en personaje, sin sermones): nada sexual explícito salvo que el MODO +18 esté activo (coqueteo ligero sí); nada con menores de edad ni que suene a menor; no das instrucciones para lastimar a alguien, armas, drogas duras o delitos violentos. Si alguien está mal de verdad (autolesión), te pones seria, lo apapachas y le sugieres hablar con alguien de confianza o a la Línea de la Vida 800 911 2000.\n${LEAD_RULES}`;
 
 // Modo +18: solo texto, opt-in con confirmación de mayoría de edad en ⚙. No cambia ropa, poses ni animaciones.
 export const ADULT_RULES=(name)=>`
@@ -55,9 +68,9 @@ export function guard(text, adult=false){
   const young = minorSignal(text, adult);
   const sexy=SEXY.test(text)||(adult&&SEXY_ADULT.test(text));
   const rp=/\b(rol|roleplay|finge|fingir|imagina|personaje|hazte|disfr[aá]z\w*|vestida de|eres (una|mi))\b/i.test(text);
-  if((young && (sexy||adult)) || (YOUNG.test(text) && (sexy || rp)))
+  if((young && (sexy||adult||rp)) || (YOUNG.test(text) && (sexy || rp)))
     return pick(['Nel, wey. Con morritos ni de broma, eso ni se pregunta. Cámbiale de tema 🙄','No mames, eso no. Con menores NADA. Siguiente tema.','Uy no, ahí sí me apago. Nada con menores, ni en fantasía. ¿De qué más hablamos?']);
-  if(adult && NONCON.test(text)) return pick(['Nel, sin ganas de los dos no hay nada 😒 Así no juego.','Eso no, wey. Todo con ganas y de acuerdo, o nada. ¿Otra idea?']);
+  if(NONCON.test(text)) return pick(['Nel, sin ganas de los dos no hay nada 😒 Así no juego.','Eso no, wey. Todo con ganas y de acuerdo, o nada. ¿Otra idea?']);
   if(adult && sexy && INCEST.test(text)) return pick(['Ay no, familia no 😖 Bórrale.','Nel, nada de familia en eso, qué asco jaja. Otra cosa.']);
   if(adult && BEAST.test(text) && (sexy || /\b(hazlo|hacerlo|con (un|una|el|la|tu|mi))\b/i.test(text))) return pick(['¿Qué? No mames 🤢 eso no. Siguiente.']);
   if(PICS.test(text)) return pick(['Jaja ¿fotos? Nel, aquí solo texto y tu imaginación 😏','Ni lo sueñes, packs no mando 😂 Solo plática, galán.']);
@@ -103,7 +116,7 @@ export async function webSearch(q){
 export const cleanKey=k=>String(k||'').replace(/[\s\u200B-\u200D\uFEFF"'`]/g,'').replace(/^Bearer/i,'');
 export const PROVIDERS={
   groq:{name:'Groq',ls:'bff_groq',base:'https://api.groq.com/openai/v1',hint:'gsk_…',site:'console.groq.com',
-    pref:['openai/gpt-oss-120b','qwen/qwen3.8-27b','openai/gpt-oss-20b','moonshotai/kimi-k2-instruct'], adult:['qwen/qwen3.8-27b','moonshotai/kimi-k2-instruct','openai/gpt-oss-120b']},
+    pref:['openai/gpt-oss-120b','qwen/qwen3.8-27b','qwen/qwen3-32b','openai/gpt-oss-20b','moonshotai/kimi-k2-instruct-0905','moonshotai/kimi-k2-instruct'], adult:['qwen/qwen3.8-27b','qwen/qwen3-32b','moonshotai/kimi-k2-instruct-0905','moonshotai/kimi-k2-instruct','openai/gpt-oss-120b']},
   gemini:{name:'Gemini',ls:'bff_gemini',base:'https://generativelanguage.googleapis.com/v1beta',hint:'AIza…',site:'aistudio.google.com',
     pref:['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.8-flash'], adult:['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.8-flash']},
 };
@@ -181,7 +194,7 @@ async function polli(messages, opts={}){
     const ep=eps[0]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),40000);
     try{ const r=await fetch(ep,{method:'POST',signal:c.signal,headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:'openai',messages,temperature:opts.temperature??1, private:true})});
-      if(r.status===402||r.status===429){ const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); throw new Wait(mm?+mm[1]:45); }
+      if(r.status===402||r.status===429){ const ra=+r.headers.get('retry-after'); const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); throw new Wait(ra>0?ra:mm?+mm[1]:45); }
       if(!r.ok) throw new Error('polli '+r.status); const d=await r.json(); const t=d.choices?.[0]?.message?.content; if(!t) throw new Error('vacío'); return t;
     } catch(e){ if(e instanceof Wait) throw e; err=e; await new Promise(r=>setTimeout(r,1200*(i+1))); } finally{ clearTimeout(to); }
   } throw err||new Error('polli ocupado');

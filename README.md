@@ -7,5 +7,7 @@ Tu BFF virtual (Vale, adulta de 24) en su cuarto: platica por "WhatsApp" o en pe
 - **Voz natural offline:** Piper `es_MX-claude-high` vía vits-web (MIT), ~63 MB una sola vez.
 - **Versión:** una sola constante `VERSION` en `js/app.js`; el service worker se registra como `sw.js?v=VERSION` y nombra su caché con ella. Imágenes y clips: stale-while-revalidate.
 - **Pruebas:** `node tests/guard.test.mjs` (filtro de menores y límites +18).
+- **Conversación:** regla obligatoria, el usuario manda — Vale sigue tu tema, tono, ritmo y rol, sin cambiarte la plática; los límites duros (menores, sin consentimiento, daño a terceros, fotos) no se cruzan.
+- **Ambiente:** polvo flotando, luz según la hora del día, viñeta, Vale te sigue con la mirada y brillo de la pantalla de la compu.
 
 Todos los datos se quedan en el dispositivo del usuario (localStorage).

@@ -3,8 +3,8 @@ export const VOICES = [
   {id:'es_MX-claude-high', name:'Claude (México, natural)', kind:'piper', size:'~63 MB, se descarga una vez'},
   {id:'system', name:'Voz del sistema (robótica, último recurso)', kind:'system'},
 ];
-let tts=null, ctx=null, analyser=null, cur=null, level=0;
-export function audioLevel(){ if(!analyser) return level; const a=new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(a);
+let tts=null, ctx=null, analyser=null, cur=null, level=0, _ab=null;
+export function audioLevel(){ if(!analyser) return level; _ab=_ab||new Uint8Array(analyser.fftSize); const a=_ab; analyser.getByteTimeDomainData(a);
   let s=0; for(const v of a){ const d=(v-128)/128; s+=d*d; } return Math.min(1,Math.sqrt(s/a.length)*5.5); }
 function ac(){ if(!ctx){ ctx=new (window.AudioContext||window.webkitAudioContext)(); analyser=ctx.createAnalyser(); analyser.fftSize=1024; analyser.connect(ctx.destination); } if(ctx.state==='suspended') ctx.resume(); return ctx; }
 export function unlockAudio(){ try{ ac(); }catch{} }

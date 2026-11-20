@@ -2,7 +2,7 @@ import { Renderer, Puppet, loadImage } from './rig.js';
 import { LS, BASE_PERSONA, profileText, guard, minorSignal, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.4.1'; // única versión: también nombra la caché del service worker
+const VERSION='1.4.2'; // única versión: también nombra la caché del service worker
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -12,6 +12,7 @@ const OUTFITS=[
   {id:'hoodie',name:'Street hoodie'},
 ];
 let READY=['base','jeans','hoodie'];
+let outfitN=0; // serie para que dos clics rápidos en el clóset no se pisen
 const HAIR=[['castaño',null,'#6b3a2a'],['negro',[0.07,0.25,0.42],'#1b1414'],['rubio',[0.11,0.95,1.9],'#e2c06a'],['pelirroja',[0.015,1.5,1.08],'#b8361e'],['rosa',[0.93,1.2,1.75],'#f28cc0'],['morado',[0.78,1.1,1.15],'#7a3fb0'],['azul',[0.6,1.1,1.1],'#2f5fb8'],['plateado',[0.65,0.12,2.4],'#c9ccd6'],['verde',[0.42,0.9,1.05],'#2f8f6a']];
 const EYES=[['café',null,'#7a4a33'],['azul',[0.58,1.2,1.2],'#3b7ddd'],['verde',[0.33,1.1,1.15],'#3ea65a'],['miel',[0.09,1.2,1.25],'#c98b2b'],['morado',[0.78,1.1,1.15],'#8c4fd1'],['rojo',[0.98,1.4,1.0],'#c3394b']];
 const EARS=[['jade',null,'#4f9a6c'],['oro',[0.12,1.3,1.3],'#d4a72c'],['plata',[0.6,0.08,1.7],'#cfd3da'],['rosa',[0.93,1.1,1.35],'#ef7fb6'],['zafiro',[0.6,1.2,1.1],'#3060c8'],['rubí',[0.0,1.3,1.0],'#b8202f']];
@@ -29,7 +30,7 @@ if(!READY.includes(look.outfit)) look.outfit='base';
 if(!LS.get('bff_v2',false)){ look.eye=0; LS.set('bff_v2',true); }
 let hist=LS.get('bff_hist',[]);
 const saveCfg=()=>LS.set('bff_cfg',cfg), saveLook=()=>LS.set('bff_look',look), saveHist=()=>LS.set('bff_hist',hist.slice(-200));
-const R=new Renderer($('#gl'));
+let R=null; // se crea en boot() para poder avisar si no hay WebGL
 let bgTex, pup={}, meta={};
 const her={spot:'idle',mode:'stand',phone:0,phoneT:0,show:1,squash:1,hop:0,typingDesk:false,walking:false};
 const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,typing:0,open:0};
@@ -48,10 +49,11 @@ async function loadOutfit(id, all=false){
 }
 async function boot(){
   try{
+    R=new Renderer($('#gl'));
     prog(0.1); const bg=await loadImage('img2/cuarto.webp'); bgTex=R.texture(bg,true); prog(0.45);
     await loadOutfit(look.outfit); prog(1);
-  }catch(e){ $('#loader .lname').textContent='No pude cargar 😢 recarga'; console.error(e); return; }
-  layout(); requestAnimationFrame(frame);
+  }catch(e){ $('#loader .lname').textContent=/WebGL/i.test(e.message||'')?'Tu navegador no soporta WebGL 😢 prueba en Chrome':'No pude cargar 😢 recarga'; console.error(e); return; }
+  layout(); fxInit(); updateAmbience(); setInterval(updateAmbience,600000); requestAnimationFrame(frame);
   setTimeout(()=>{ $('#loader').classList.add('out'); if(!CAPTURE) intro(); },150);
   loadOutfit(look.outfit,true).catch(()=>{});
   if(!CAPTURE) setTimeout(()=>preloadClips(),2500);
@@ -70,6 +72,7 @@ function layout(){
   // horizontal + modo voz: que quepa de cuerpo completo (cabeza a pies); los lados se rellenan con el cuarto atenuado
   const k= (land&&voiceMode&&!CAPTURE)? Math.min(cover, ah/800) : cover;
   cam={...cam,k,cover,fit:k<cover-1e-4,ax,ay,aw,ah};
+  fxResize();
 }
 function spotX(s){ return (SPOTS[s]||SPOTS.idle).cx; }
 function updateCam(dt){
@@ -85,6 +88,24 @@ const toScreen=(X,Y)=>[(X-cam.cx)*cam.k+cam.ax+cam.aw/2,(Y-cam.cy)*cam.k+cam.ay+
 const toRoom=(sx,sy)=>[(sx-cam.ax-cam.aw/2)/cam.k+cam.cx,(sy-cam.ay-cam.ah/2)/cam.k+cam.cy];
 addEventListener('resize',()=>{ layout(); });
 if(window.visualViewport) visualViewport.addEventListener('resize',()=>{ document.getElementById('app').style.height=visualViewport.height+'px'; layout(); });
+// ---------- ambiente del cuarto: polvo flotando, luz según la hora, mirada que sigue ----------
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fx=$('#fx'), fxc=fx.getContext('2d');
+let motes=[], bursts=[];
+function fxResize(){ const d=Math.min(devicePixelRatio||1,2); fx.width=Math.max(1,Math.round(fx.clientWidth*d)); fx.height=Math.max(1,Math.round(fx.clientHeight*d)); }
+function fxInit(){ fxResize(); motes=Array.from({length:26},()=>({x:Math.random(),y:Math.random(),r:0.6+Math.random()*1.8,s:0.008+Math.random()*0.02,ph:Math.random()*6.28,a:0.15+Math.random()*0.35})); }
+function fxBurst(sx,sy,n=10){ if(REDUCED) return; for(let i=0;i<n;i++){ const a=Math.random()*6.28, sp=20+Math.random()*50; bursts.push({x:sx,y:sy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-20,life:1}); } }
+function fxDraw(dt){ if(!fxc||REDUCED) return; const W=fx.width,H=fx.height; fxc.clearRect(0,0,W,H);
+  for(const m of motes){ m.y-=m.s*dt; m.x+=Math.sin(T*0.3+m.ph)*0.0004; if(m.y<-0.02){ m.y=1.02; m.x=Math.random(); }
+    fxc.globalAlpha=m.a*(0.5+0.5*Math.sin(T*1.2+m.ph*3)); fxc.fillStyle='#ffe9f6'; fxc.beginPath(); fxc.arc(m.x*W,m.y*H,Math.max(0.8,m.r*(W/800+0.5)),0,6.29); fxc.fill(); }
+  bursts=bursts.filter(b=>b.life>0);
+  for(const b of bursts){ b.life-=dt*1.4; b.x+=b.vx*dt; b.y+=b.vy*dt; b.vy+=60*dt; fxc.globalAlpha=Math.max(0,b.life)*0.9; fxc.fillStyle='#ffb3dd'; fxc.beginPath(); fxc.arc(b.x,b.y,2.5*b.life+1,0,6.29); fxc.fill(); }
+  fxc.globalAlpha=1; }
+function updateAmbience(){ const el=$('#ambience'); if(!el) return; const h=new Date().getHours();
+  el.style.background=h>=6&&h<11?'linear-gradient(rgba(255,217,160,.13),transparent 60%)':h>=11&&h<17?'linear-gradient(rgba(255,246,216,.10),transparent 60%)':h>=17&&h<20?'linear-gradient(rgba(255,154,92,.16),rgba(122,63,176,.10) 130%)':'linear-gradient(rgba(42,26,94,.20),rgba(11,16,48,.20) 130%)'; }
+let lookX=0, lookY=0, lookT=-10;
+addEventListener('pointermove',e=>{ lookX=(e.clientX/innerWidth-0.5)*2; lookY=(e.clientY/innerHeight-0.5)*2; lookT=T; });
+let gustT=3, gust=0;
 
 // ---------- animación ----------
 let last=performance.now(), T=0, nextBlink=/capture=1/.test(location.search)?1e9:1.5, blinkT=-1, dbl=false;
@@ -96,14 +117,15 @@ function frame(now){
   P.breath=Math.sin(T*1.55)*(talking?1.2:1);
   const still=her.spot!=='idle'; // en cama/compu/clóset es un parche del cuadro: menos vaivén
   P.hip=(Math.sin(T*0.45)*2.6+Math.sin(T*0.17)*1.2)*(still?0.25:1); P.lean=-P.hip*0.0012;
-  P.hairAmp=0.7; P.hairWind=0;
+  P.hairAmp=0.7; gustT-=dt; if(gustT<=0){ gustT=4+Math.random()*5; gust=0.6+Math.random()*0.8; } P.hairWind=Math.sin(T*0.7)*0.25+gust*Math.sin(T*2.1)*0.35;
   const isTalk=talking||T<fakeTalkUntil;
   gestT-=dt; if(gestT<=0){ gestT=0.45+Math.random()*0.7;
     if(isTalk){ G.tilt=(Math.random()-.5)*0.09; G.nod=Math.random()<0.5?0.8:0; G.armL=(Math.random()-.5)*0.06; G.armR=(Math.random()-.5)*0.06; G.turn=(Math.random()-.5)*0.5; }
     else { G.tilt=(Math.random()-.5)*0.04; G.nod=0; G.armL=0; G.armR=0; G.turn=(Math.random()-.5)*0.2; } }
   const ph=her.phone;
-  const tiltT=G.tilt+Math.sin(T*0.6)*0.02+Math.sin(T*1.7)*0.008 + her.hop*0.05;
-  P.headTilt=lerp(P.headTilt,tiltT,dt*3); P.nod=lerp(P.nod,(isTalk?G.nod*Math.max(0,Math.sin(T*7)):0)+ph*0.4,dt*6); P.headTurn=lerp(P.headTurn,G.turn*0.6,dt*2.5);
+  const lookOn=T-lookT<3?1:0;
+  const tiltT=G.tilt+Math.sin(T*0.6)*0.02+Math.sin(T*1.7)*0.008 + her.hop*0.05 + lookY*0.03*lookOn;
+  P.headTilt=lerp(P.headTilt,tiltT,dt*3); P.nod=lerp(P.nod,(isTalk?G.nod*Math.max(0,Math.sin(T*7)):0)+ph*0.4,dt*6); P.headTurn=lerp(P.headTurn,G.turn*0.6+lookX*0.35*lookOn,dt*2.5);
   P.armL=lerp(P.armL,G.armL+Math.sin(T*0.9)*0.01,dt*3); P.armR=lerp(P.armR,G.armR-Math.sin(T*0.8)*0.01,dt*3);
   let open=0; if(talking) open=V.audioLevel(); else if(T<fakeTalkUntil) open=Math.max(0,Math.sin(T*15)*0.5+Math.sin(T*23)*0.3+0.15);
   P.open=lerp(P.open,Math.min(1,open),dt*18);
@@ -115,6 +137,7 @@ function frame(now){
   fadeT=Math.min(1,fadeT+dt*2.5);
   updateCam(dt);
   draw();
+  fxDraw(dt);
   placeBubble();
   requestAnimationFrame(frame);
 }
@@ -130,7 +153,7 @@ function drawSpot(spot,alpha,lu){
   if(b&&f>0.001) b.draw(P,T,place(b),cam,alpha*f,lu);
 }
 function draw(){
-  R.clear(); const glow= her.spot==='desk'&&her.typingDesk? [0.75,0.33,0.10+0.01*Math.sin(T*20),0.09] : null;
+  R.clear(); const glow= her.spot==='desk' ? (her.typingDesk?[0.75,0.33,0.10+0.01*Math.sin(T*20),0.09]:[0.75,0.33,0.11,0.08]) : [0.75,0.33,0.13,0.06];
   if(cam.fit) R.drawBg(bgTex,ROOM.w,ROOM.h,{...cam,k:cam.cover,cx:ROOM.w/2,cy:ROOM.h/2},0.32,null);
   R.drawBg(bgTex,ROOM.w,ROOM.h,cam,1,glow);
   const lu=lookUniforms();
@@ -174,6 +197,7 @@ async function _goSpot(name){
     await loadOutfit(look.outfit,true).catch(()=>{});
     const legs=(from!=='idle'&&name!=='idle')? [[from,'idle'],['idle',name]] : [[from,name]];
     for(const [a,b] of legs){ if(!(await playClip(a,b))) await crossTo(b); }
+    const S=SPOTS[her.spot]; const [bx,by]=toScreen(S.cx,S.foot); fxBurst(bx,by,10);
   } finally { moving_now=false; }
 }
 async function goDesk(){ if(her.spot==='desk') return; await goSpot('desk'); }
@@ -190,7 +214,7 @@ function placeBubble(){
 
 // ---------- chat UI ----------
 const hhmm=ts=>new Date(ts).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-function esc(s){ return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function bubbleEl(m){
   const d=document.createElement('div'); d.className='m '+(m.role==='user'?'me':m.role==='sys'?'sys':'her');
   d.innerHTML=esc(m.content).replace(/(https?:\/\/[^\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
@@ -229,7 +253,7 @@ async function speakLine(text){
   ear&&ear.pause(); talking=true;
   try{ await V.speak(text,cfg.voice,kind=>{ if(kind==='system'&&!warnedSys){ warnedSys=true; push({role:'sys',content:'Uso la voz del sistema porque la natural no cargó (suena más robótica). Revisa ⚙ → Voz.'}); } }); }
   catch{ fakeTalkUntil=T+Math.min(10,1+text.length*0.055); }
-  talking=false; if(voiceMode) ear&&ear.resume();
+  talking=false; if(pendingVoice){ const v=pendingVoice; pendingVoice=null; send(v); } if(voiceMode) ear&&ear.resume();
 }
 let warnedSys=false;
 let pending=false, limitWarned=false;
@@ -272,7 +296,7 @@ async function respond(){
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 async function research(q,orig){
   markRead(); const ack=pick([`Va, déjame lo investigo en la compu 💻`,`Órale, ahorita lo busco, aguanta 🔎`,`Sale, voy a la compu a checar eso 👀`]);
-  push({role:'assistant',content:ack}); if(voiceMode||cfg.readAloud) speakLine(ack); else say(ack,2200);
+  push({role:'assistant',content:ack}); if(voiceMode||cfg.readAloud) await speakLine(ack); else say(ack,2200);
   const prevSpot=her.spot==='desk'?'idle':her.spot;
   const [_,found]=await Promise.all([goDesk(), webSearch(q).catch(()=>[])]);
   her.typingDesk=true; setTyping(true);
@@ -291,9 +315,9 @@ function intro(){
   her.hop=1; her.squash=0.92;
   const line= first? `¡Quiubo! 👋 Por fin alguien que me pela. Soy ${cfg.name}, tu nueva BFF. ¿Qué onda contigo, qué tal tu día? Cuéntame el chisme 😏`
     : pick([`¡Ya volviste${nom?', '+nom:''}! 🙌 Te extrañé, ¿eh? ¿Qué me cuentas?`,`¡Eyyy${nom?' '+nom:''}! 😏 ¿Qué milagro? Échame el chisme.`,`Mira nomás quién regresó${nom?', '+nom:''} 😂 ¿Qué traes?`]);
-  render(); say(first?'¡Quiubo! 👋':'¡Eyyy! 👋',2600);
-  setTimeout(()=>{ setTyping(true); },400);
-  setTimeout(()=>{ setTyping(false); push({role:'assistant',content:line}); fakeTalkUntil=T+0.8; if(first) showHints(); },1300);
+  render(); say(first?'¡Quiubo! 👋':'¡Eyyy! 👋',2600); const introLen=hist.length;
+  setTimeout(()=>{ if(hist.length!==introLen) return; setTyping(true); },400);
+  setTimeout(()=>{ if(hist.length!==introLen) return; setTyping(false); push({role:'assistant',content:line}); fakeTalkUntil=T+0.8; if(first) showHints(); },1300);
 }
 function showHints(){
   const h=$('#hints'); h.innerHTML=''; const items=[['bed','🛏️ Cama',230,330],['closet','👗 Clóset',500,150],['pc','💻 Compu',1000,270]];
@@ -319,6 +343,7 @@ $('#gl').addEventListener('click',e=>{
   if(Y>560 && her.spot!=='idle' && !busy) goSpot('idle');
 });
 function poke(){ const t=performance.now(); if(t-lastPoke<800) return; lastPoke=t; her.hop=1; her.squash=0.94; G.tilt=(Math.random()-.5)*0.2;
+  const S=SPOTS[her.spot]; const [px,py]=toScreen(S.cx,S.top+120); fxBurst(px,py,8);
   const l=pick(['¡Ay, qué! 😂','¿Qué me ves? 😏','Jajaja no me piques 🙈','¿Mande? 👀','Oye, respeta 😤 jaja']); say(l,1800); fakeTalkUntil=T+0.9; }
 
 // ---------- barra de texto / mic ----------
@@ -327,11 +352,11 @@ txt.addEventListener('input',()=>{ txt.style.height='auto'; txt.style.height=Mat
 txt.addEventListener('focus',()=>{ userTyping=T+3; });
 txt.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); $('#bar').requestSubmit(); } });
 $('#bar').addEventListener('submit',e=>{ e.preventDefault(); const v=txt.value; txt.value=''; txt.style.height='auto'; send(v); });
-let ear=null;
+let ear=null, pendingVoice=null;
 $('#mic').addEventListener('click',async()=>{
   V.unlockAudio();
   if(!voiceMode){
-    ear=ear||new V.Ear(t=>{ if(!talking) send(t); },t=>{ txt.placeholder='🎙️ '+t; });
+    ear=ear||new V.Ear(t=>{ if(talking) pendingVoice=t; else send(t); },t=>{ txt.placeholder='🎙️ '+t; });
     if(!ear.ok){ push({role:'sys',content:'Tu navegador no deja usar el micrófono aquí. Prueba en Chrome.'}); return; }
     ear.onDenied=()=>{ push({role:'sys',content:'No me diste permiso del micrófono 😢 Actívalo en el candadito de la barra de direcciones.'}); setVoice(false); };
     setVoice(true); ear.start();
@@ -343,9 +368,9 @@ function setVoice(on){ voiceMode=on; document.body.classList.toggle('voice-mode'
 let dlP=null;
 function downloadVoice(onp){
   if(dlP) return dlP; const m=push({role:'sys',content:'Bajando mi voz natural (una sola vez, ~63 MB)… 0%'});
-  dlP=V.preparePiper(p=>{ const t=`Bajando mi voz natural (una sola vez, ~63 MB)… ${Math.round(p*100)}%`; m.content=t; if(m._el) m._el.firstChild.textContent=t; onp&&onp(p); })
-    .then(()=>{ m.content='¡Listo! Ya tengo mi voz 🎙️'; if(m._el) m._el.firstChild.textContent=m.content; })
-    .catch(e=>{ dlP=null; m.content='No pude bajar la voz natural (¿sin internet?). Mientras, uso la del sistema.'; if(m._el) m._el.firstChild.textContent=m.content; });
+  dlP=V.preparePiper(p=>{ const t=`Bajando mi voz natural (una sola vez, ~63 MB)… ${Math.round(p*100)}%`; m.content=t; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=t; onp&&onp(p); })
+    .then(()=>{ m.content='¡Listo! Ya tengo mi voz 🎙️'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; })
+    .catch(e=>{ dlP=null; m.content='No pude bajar la voz natural (¿sin internet?). Mientras, uso la del sistema.'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; });
   return dlP;
 }
 
@@ -364,8 +389,8 @@ async function openCloset(walk){
   sheet('Clóset de '+cfg.name, html(), el=>{
     el.onclick=async e=>{ const b=e.target.closest('button'); if(!b) return;
       if(b.dataset.tab){ tab=b.dataset.tab; el.innerHTML=html(); return; }
-      if(b.dataset.outfit){ const id=b.dataset.outfit; if(id===look.outfit) return; b.style.opacity=.5;
-        await loadOutfit(id, true); her.squash=0.05; await sleep(140); look.outfit=id; saveLook(); her.hop=0.7; el.innerHTML=html();
+      if(b.dataset.outfit){ const id=b.dataset.outfit; if(id===look.outfit) return; b.style.opacity=.5; const n=++outfitN;
+        await loadOutfit(id, true); if(n!==outfitN) return; her.squash=0.05; await sleep(140); if(n!==outfitN) return; look.outfit=id; saveLook(); her.hop=0.7; el.innerHTML=html();
         say(pick(['¿Cómo me veo? 😏','¡Ay, me encanta! ✨','Uff, qué chula 💅']),2000); loadOutfit(id,true).catch(()=>{}); preloadClips(id); return; }
       if(b.dataset.k){ look[b.dataset.k]=+b.dataset.i; saveLook(); el.innerHTML=html(); her.hop=0.4; }
     };
@@ -409,7 +434,7 @@ async function openSettings(){
     el.querySelector('#sPersona').onchange=e=>{ cfg.persona=e.target.value; saveCfg(); };
     const dl=el.querySelector('#sDl'); if(dl) dl.onclick=()=>{ dl.disabled=true; dl.textContent='Descargando…'; downloadVoice(p=>{ const i=el.querySelector('#sProg'); if(i) i.style.width=Math.round(p*100)+'%'; }).then(()=>{ dl.textContent='✅ Lista'; }); };
     el.querySelector('#sReset').onclick=()=>{ if(!confirm('¿Seguro? '+cfg.name+' va a olvidar todo lo que platicaron.')) return;
-      ['bff_hist','bff_profile','bff_ucount'].forEach(LS.del); hist=[]; userCount=0; closeSheet(); render(); intro(); };
+      ['bff_hist','bff_profile','bff_ucount','bff_stats'].forEach(LS.del); hist=[]; userCount=0; cfg.adult=false; saveCfg(); closeSheet(); render(); intro(); };
   });
 }
 
