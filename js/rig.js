@@ -22,7 +22,7 @@ vec3 lid(vec3 col, vec2 px, vec4 e){
  float ee=(p.x*p.x)/(e.z*e.z)+(p.y*p.y)/(e.w*e.w);
  float yl=-e.w+2.*e.w*uBlink;
  if(ee<1.15 && p.y<yl) col = uSkin*(0.92+0.08*(p.y/e.w));
- if(ee<1.25 && abs(p.y-yl)<1.8 && uBlink>0.12) col = vec3(0.16,0.09,0.08);
+ if(ee<1.25 && abs(p.y-yl)<min(1.8,e.w*0.28) && uBlink>0.12) col = vec3(0.16,0.09,0.08);
  return col; }
 void main(){
  vec4 c=texture2D(uTex,vUV); if(c.a<0.003) discard;
@@ -32,7 +32,7 @@ void main(){
  if(uEarOn>0.5 && m.b>0.02) rgb=mix(rgb,recolor(rgb,uEar),m.b);
  if(uFace>0.5){
   if(uBlink>0.02){ rgb=lid(rgb,px,uEyeL); rgb=lid(rgb,px,uEyeR); }
-  if(uOpen>0.03){ vec2 q=px-uMouth.xy; float ry=uOpen*6.5; q.y-=ry*0.55; float rx=uMouth.z*(0.55+0.25*uOpen);
+  if(uOpen>0.03){ vec2 q=px-uMouth.xy; float ry=uOpen*6.5*clamp(uMouth.z/10.,0.35,1.); q.y-=ry*0.55; float rx=uMouth.z*(0.55+0.25*uOpen);
    float e=(q.x*q.x)/(rx*rx)+(q.y*q.y)/(ry*ry);
    if(e<1.){ vec3 mc=vec3(0.36,0.09,0.12); if(q.y<-ry*0.45) mc=vec3(0.96,0.93,0.92); rgb=mix(rgb,mc,smoothstep(1.,0.75,e)); } }
  }
@@ -127,26 +127,15 @@ export class Puppet {
       const br=Math.sin(t*1.6)*1.2*smooth(L.neckY+260,L.neckY,v)*smooth(L.neckY-60,L.neckY+20,v); y-=br;
       // tecleo: manos
       const dh=Math.hypot(u-L.hands[0],v-L.hands[1]); if(dh<70){ const w=1-dh/70; y+=Math.sin(t*22+u*0.15)*2.2*w*P.typing; x+=Math.sin(t*9+v*0.2)*1.2*w*P.typing; }
+      // mandíbula (perfil en compu/clóset)
+      if(P.open>0.02&&L.mouth){ const jr=L.jawR||[20,14], dm=Math.hypot((u-L.mouth[0])/jr[0],(v-L.mouth[1]-jr[1])/jr[1]); if(dm<1&&v>L.mouth[1]-1) y+=P.open*(jr[1]/7)*(1-dm); }
       // cabeza
       const a=(P.headTilt*0.6+Math.sin(t*0.9)*0.02+P.typing*Math.sin(t*3.1)*0.015)*wHead; const dx=x-L.neck[0], dy=y-L.neck[1];
       x=L.neck[0]+dx*Math.cos(a)-dy*Math.sin(a); y=L.neck[1]+dx*Math.sin(a)+dy*Math.cos(a)+P.nod*3*wHead;
       x+=hw*smooth(L.neckY-40,L.neckY+300,v)*Math.sin(t*1.4+v*0.012)*3;
       return [x,y];
     }
-    const cx=L.cx, legTop=L.legTop, knee=L.kneeY, foot=L.footY;
-    // --- piernas: sentarse (escorzo de muslos) y caminar
-    let lift=0;
-    if(v>legTop){
-      const sideB=smooth(cx-18,cx+18,u), fl=(v-legTop)/(foot-legTop);
-      if(P.walk>0.001){ const ph=P.walkPhase; const sA=Math.sin(ph), sB=Math.sin(ph+Math.PI);
-        const s=sA*(1-sideB)+sB*sideB; x+=s*24*P.walk*fl; lift=-Math.max(0,s)*24*P.walk*fl*fl; }
-      if(P.sit>0.001){ const tt=Math.min(v,knee)-legTop, rest=Math.max(0,v-knee); const yy=legTop+tt*(1-0.66*P.sit)+rest; lift+=(yy-v);
-        // rodillas un poco abiertas y pies juntos al sentarse
-        const side=sideB*2-1; x+=side*P.sit*6*smooth(legTop,knee,v)*(1-smooth(knee,foot,v)*0.6); }
-    }
-    y+=lift;
-    // anclar pies: compensar acortamiento al sentarse
-    const red=0.66*P.sit*(knee-legTop); y+=red;
+    const cx=L.cx, legTop=L.legTop, foot=L.footY;
     // --- cambio de peso / cadera
     const wUp=smooth(foot,legTop,v); x+=P.hip*wUp;
     // --- respiración (pecho/hombros)
@@ -161,12 +150,12 @@ export class Puppet {
     // --- mandíbula
     if(P.open>0.02){ const dm=Math.hypot((u-L.mouth[0])/34,(v-L.mouth[1]-24)/24); if(dm<1&&v>L.mouth[1]-2) y+=P.open*3.2*(1-dm); }
     // --- torso inclinación (alrededor de la cadera)
-    const wLean=smooth(legTop+20,L.waistY-40,v); if(P.lean){ const a=P.lean*wLean, dx=x-cx, dy=y-(legTop+red); x=cx+dx*Math.cos(a)-dy*Math.sin(a); y=(legTop+red)+dx*Math.sin(a)+dy*Math.cos(a); }
+    const wLean=smooth(legTop+20,L.waistY-40,v); if(P.lean){ const a=P.lean*wLean, dx=x-cx, dy=y-legTop; x=cx+dx*Math.cos(a)-dy*Math.sin(a); y=legTop+dx*Math.sin(a)+dy*Math.cos(a); }
     // --- cabeza: inclinación + asentir + giro
     const wHead=smooth(L.neckY+18,L.neckY-36,v);
     // el cabello largo sigue a la cabeza parcialmente
     const wHH=Math.max(wHead, hw*smooth(L.waistY+80,L.neckY,v)*0.55);
-    if(wHH>0){ const pvx=cx+P.hip, pvy=L.neckY+red-P.breath*2.2; const a=P.headTilt*wHH, dx=x-pvx, dy=y-pvy;
+    if(wHH>0){ const pvx=cx+P.hip, pvy=L.neckY-P.breath*2.2; const a=P.headTilt*wHH, dx=x-pvx, dy=y-pvy;
       x=pvx+dx*Math.cos(a)-dy*Math.sin(a)+P.headTurn*7*wHead; y=pvy+dx*Math.sin(a)+dy*Math.cos(a)+P.nod*5*wHead; }
     // --- vaivén del pelo (puntas)
     const hs=hw*smooth(L.shoulderY-40,L.waistY+120,v);

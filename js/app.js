@@ -1,8 +1,8 @@
 import { Renderer, Puppet, loadImage } from './rig.js';
-import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
+import { LS, BASE_PERSONA, profileText, guard, minorSignal, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.3.3';
+const VERSION='1.4.0'; // única versión: también nombra la caché del service worker
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -32,7 +32,7 @@ const saveCfg=()=>LS.set('bff_cfg',cfg), saveLook=()=>LS.set('bff_look',look), s
 const R=new Renderer($('#gl'));
 let bgTex, pup={}, meta={};
 const her={spot:'idle',mode:'stand',phone:0,phoneT:0,show:1,squash:1,hop:0,typingDesk:false,walking:false};
-const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,walk:0,walkPhase:0,sit:0,typing:0,open:0};
+const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,typing:0,open:0};
 const G={tilt:0,nod:0,armL:0,armR:0,turn:0}; let gestT=0;
 let talking=false, fakeTalkUntil=0, herTyping=false, userTyping=0, voiceMode=false, busy=false, lastPoke=0;
 let cam={k:1,cx:646,cy:416,ax:0,ay:0,aw:1,ah:1}, camX=SPOTS.idle.cx, camY=416, fadeFrom=null, fadeT=1;
@@ -55,7 +55,7 @@ async function boot(){
   setTimeout(()=>{ $('#loader').classList.add('out'); if(!CAPTURE) intro(); },150);
   loadOutfit(look.outfit,true).catch(()=>{});
   if(!CAPTURE) setTimeout(()=>preloadClips(),2500);
-  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v='+VERSION).catch(()=>{});
 }
 
 // ---------- layout / cámara ----------
@@ -66,8 +66,10 @@ function layout(){
   if(land){ const pw=Math.min(400,Math.round(W*0.38)); document.body.style.setProperty('--panelW',pw+'px'); if(!voiceMode) aw=W-pw; ah=H; }
   else { const ch=voiceMode?0:Math.round(H*0.40); document.body.style.setProperty('--chatH',ch+'px'); document.body.style.setProperty('--capH',ch+'px'); ah=H-barH-(voiceMode?0:ch-12); }
   if(CAPTURE){ ax=0; ay=0; aw=W; ah=H; }
-  const k=Math.max(aw/ROOM.w, ah/ROOM.h);
-  cam={...cam,k,ax,ay,aw,ah};
+  const cover=Math.max(aw/ROOM.w, ah/ROOM.h);
+  // horizontal + modo voz: que quepa de cuerpo completo (cabeza a pies); los lados se rellenan con el cuarto atenuado
+  const k= (land&&voiceMode&&!CAPTURE)? Math.min(cover, ah/800) : cover;
+  cam={...cam,k,cover,fit:k<cover-1e-4,ax,ay,aw,ah};
 }
 function spotX(s){ return (SPOTS[s]||SPOTS.idle).cx; }
 function updateCam(dt){
@@ -129,6 +131,7 @@ function drawSpot(spot,alpha,lu){
 }
 function draw(){
   R.clear(); const glow= her.spot==='desk'&&her.typingDesk? [0.75,0.33,0.10+0.01*Math.sin(T*20),0.09] : null;
+  if(cam.fit) R.drawBg(bgTex,ROOM.w,ROOM.h,{...cam,k:cam.cover,cx:ROOM.w/2,cy:ROOM.h/2},0.32,null);
   R.drawBg(bgTex,ROOM.w,ROOM.h,cam,1,glow);
   const lu=lookUniforms();
   const vidOn = clip&&!clip.done&&clip.alpha>0;
@@ -254,7 +257,10 @@ async function askAI(msgs){
 }
 async function respond(){
   const text=lastUser(); if(!text) return;
-  const g=guard(text,!!cfg.adult);
+  // si en modo +18 hay señal de menor de edad, el modo se apaga solo (hay que volver a confirmar en ⚙)
+  const minorInAdult=cfg.adult && minorSignal(text,true);
+  if(minorInAdult){ cfg.adult=false; saveCfg(); push({role:'sys',content:'🔞 Modo +18 desactivado: hubo señal de que podrías ser menor de edad. Si fue un error, vuelve a activarlo en ⚙.'}); }
+  const g=guard(text, minorInAdult || !!cfg.adult);
   if(g){ await sleep(500); markRead(); setTyping(true); await sleep(900); setTyping(false); await reply({text:g}); return; }
   const q=researchQuery(text.split('\n').pop());
   if(q){ await research(q,text); return; }

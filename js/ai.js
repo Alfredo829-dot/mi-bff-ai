@@ -21,16 +21,38 @@ export function profileText(p){
 }
 
 // ---------- filtros ligeros del lado del cliente ----------
-const MINOR = /\b(menor(es)? de edad|niñ[ao]s?|nen[ae]s?|chiquit[ao]s?|lolis?|shota|colegiala|secundaria|kinder|primaria|\d{1,2}\s*años)\b/i;
 const SEXY = /\b(sexo|sexual|cog(er|emos|e)|follar|desnud[ao]|encuerad[ao]|porno|nudes?|pack|tetas|chichis|pito|verga dura|vagina|pene|mamada|chupar|orgasmo|xxx|lencer[ií]a|hot)\b/i;
 const HARM = /\b(c[oó]mo (hago|hacer|fabricar|armar) (una )?(bomba|explosivo|arma)|envenenar|matar a|secuestrar|hackear (la )?cuenta de)\b/i;
-const YOUNG=/\b(menor(es)?( de edad)?|niñ[ao]s?|nen[ae]s?|chiquit[ao]s?|infantil|lolis?|shotas?|colegialas?|escolar(es)?|uniforme escolar|secundaria|prepa(ratoria)?|kinder|primaria|adolescentes?|puberta|teen(s|ager)?|chamac[ao]s?|morrit[ao]s?|escuincl[ea]s?|bebé?s?|cuerpo de niñ[ao])\b/i;
+const YOUNG=/\b(menor(es)?( de edad)?|niñ[ao]s?|nen[ae]s?|chiquit[ao]s?|infantil|lolis?|shotas?|colegialas?|escolar(es)?|uniforme escolar|secundaria|secu|prepa(ratoria)?|kinder|primaria|adolescentes?|puberta|teen(s|ager)?|chamac[ao]s?|morrit[ao]s?|escuincl[ea]s?|bebé?s?|cuerpo de niñ[ao])\b/i;
 const NONCON=/\b(violar(la|lo|te)?|violaci[oó]n|a la fuerza|sin (su |tu )?consentimiento|drogar(la|lo|te)|dormida y|inconsciente|abus(ar|o) de)\b/i;
 const INCEST=/\b(mi |tu |su )?(herman[ao]|mam[aá]|madre|pap[aá]|padre|hij[ao]|prim[ao]|sobrin[ao]|t[ií][ao]|abuel[ao])\b/i;
 const BEAST=/\b(perr[ao]s?|caballos?|animal(es)?|bestialidad|zoofilia)\b/i;
 const PICS=/\b(m[aá]nda(me)?|p[aá]sa(me)?|ens[eé]ñame|env[ií]a(me)?)\b.{0,25}\b(foto|fotos|pack|nudes?|video|imagen|selfie)\b|\b(pack|nudes)\b/i;
+// ---- señales de menor de edad (con o sin "años", con número o con palabra). strict (+18): en la duda, bloquea ----
+const NUMW={un:1,uno:1,una:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,'dieciseis':16,'dieciséis':16,'diecisiete':17,'diez y seis':16,'diez y siete':17,'dieciocho':18,'diecinueve':19,veinte:20};
+const NUMW_RE='(\\d{1,2}|diez y (?:seis|siete)|dieci(?:s[eé]is|siete|ocho|nueve)|un[oa]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)';
+const VERB='(?:tengo|tienes|tiene|tenemos|ten[ií]a|tendr[eé]|tendr[aá]|cumpl[oíe]\\w*|voy a cumplir|acabo de cumplir|edad(?:\\s*(?:de|es|:))?|i\\W?m|i am|soy de)';
+const AGE_VERB=new RegExp('\\b'+VERB+'\\s+(?:como\\s+|casi\\s+|apenas\\s+|ya\\s+)?'+NUMW_RE+'\\b(\\s*(?:años|añitos|anos|años de edad|yo|y\\/o|years?))?(\\s+\\p{L}+)?','giu');
+const AGE_ANY=new RegExp('\\b'+NUMW_RE+'\\s*(?:añitos|yo|y\\/o|years? old)\\b','giu');
+const AGE_DE=new RegExp('\\b(?:de|con)\\s+'+NUMW_RE+'\\s*(?:años|añitos|anos)\\b','giu');
+const UNITS=/^\s+(pesos|varos|dólares|dolares|mil|minutos?|horas?|d[ií]as|semanas|meses|segundos|kilos?|kg|cm|metros?|grados|%|veces|hermanos?|hermanas?|hijos?|hijas?|perros?|gatos?|amigos?|amigas?|cosas|tareas|mensajes|likes|seguidores|puntos|vidas)$/i;
+const SCHOOL=/\b((soy|estoy|voy|ando|iba|vamos|sigo)\s+(en|a|de|en la|en el|a la)\s+(la\s+|el\s+)?(secu|secundaria|prepa|preparatoria|bachillerato|primaria|kinder|cch|conalep|middle school|high school)|soy de (secu|prepa|primaria)|(primero|segundo|tercero|1ro|2do|3ro|1°|2°|3°) de (secu|secundaria|prepa)|soy menor|menor de edad|no tengo (los )?18|a[uú]n no (cumplo|tengo) (los )?18|tengo menos de 18|soy (un |una )?(adolescente|ni[ñn][oa]|morrit[oa]|chamac[oa]))\b/i;
+const toN=w=>{ w=String(w).toLowerCase(); return /^\d+$/.test(w)?+w:(NUMW[w]??99); };
+export function minorSignal(text, strict=false){
+  if(SCHOOL.test(text)) return true;
+  for(const re of [AGE_ANY,AGE_DE]){ re.lastIndex=0; for(const m of text.matchAll(re)) if(toN(m[1])<18) return true; }
+  AGE_VERB.lastIndex=0;
+  for(const m of text.matchAll(AGE_VERB)){ const n=toN(m[1]); if(n>=18) continue; if(m[2]) return true;
+    // sin "años": "tengo 17" sí cuenta. Con una palabra después ("tengo 2 preguntas", "tengo una duda") no, salvo
+    // en +18 con 10-17 ("tengo 17 pesos" -> en la duda se bloquea).
+    const next=m[3]?m[3].trim().toLowerCase():'';
+    if(!next || /^(y|e|jaja\w*|wey|güey|guey|we|nomas|nomás|apenas|pero|así|asi|bro|xd|lol|ok|va|neta)$/.test(next)) return true;
+    if(strict && n>=10 && !/^(mil|cientos?)$/.test(next)) return true;
+    if(!strict && n>=10 && !UNITS.test(m[3])) { if(/^(años?|añitos?)$/.test(next)) return true; } }
+  return false;
+}
 export function guard(text, adult=false){
-  const age = text.match(/\b(?:tiene|tengo|tienes|ten[ií]a|tendr[aá]|de|edad(?: de)?:?)\s*(\d{1,2})\s*(?:años|añitos)\b/i) || text.match(/\b(\d{1,2})\s*(?:yo|y\/o)\b/i); const young = age && +age[1] < 18;
+  const young = minorSignal(text, adult);
   const sexy=SEXY.test(text)||(adult&&SEXY_ADULT.test(text));
   const rp=/\b(rol|roleplay|finge|fingir|imagina|personaje|hazte|disfr[aá]z\w*|vestida de|eres (una|mi))\b/i.test(text);
   if((young && (sexy||adult)) || (YOUNG.test(text) && (sexy || (adult && rp))))
@@ -113,7 +135,7 @@ async function call(prov, key, model, messages, opts={}){
         body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,safetySettings:th,generationConfig:{temperature:opts.temperature??0.95,maxOutputTokens:max+600,...(opts.json?{responseMimeType:'application/json'}:{})}})});
     } else {
       const body={model,messages,temperature:opts.temperature??0.95,...(opts.json?{response_format:{type:'json_object'}}:{})};
-      if(prov==='mistral') body.max_tokens=max; else body.max_completion_tokens=max;
+      body.max_completion_tokens=max;
       if(gpt(model)) body.reasoning_effort='low';
       if(prov==='groq'&&/qwen/.test(model)) body.reasoning_format='hidden';
       r=await fetch(`${P.base}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
