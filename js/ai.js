@@ -82,15 +82,13 @@ export const cleanKey=k=>String(k||'').replace(/[\s\u200B-\u200D\uFEFF"'`]/g,'')
 export const PROVIDERS={
   groq:{name:'Groq',ls:'bff_groq',base:'https://api.groq.com/openai/v1',hint:'gsk_…',site:'console.groq.com',
     pref:['openai/gpt-oss-120b','qwen/qwen3.8-27b','openai/gpt-oss-20b','moonshotai/kimi-k2-instruct'], adult:['qwen/qwen3.8-27b','moonshotai/kimi-k2-instruct','openai/gpt-oss-120b']},
-  mistral:{name:'Mistral',ls:'bff_mistral',base:'https://api.mistral.ai/v1',hint:'llave de console.mistral.ai',site:'console.mistral.ai',
-    pref:['mistral-small-latest','mistral-medium-latest','mistral-large-latest','open-mistral-nemo'], adult:['mistral-small-latest','open-mistral-nemo','mistral-medium-latest','mistral-large-latest']},
   gemini:{name:'Gemini',ls:'bff_gemini',base:'https://generativelanguage.googleapis.com/v1beta',hint:'AIza…',site:'aistudio.google.com',
     pref:['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.8-flash'], adult:['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.8-flash']},
-  cerebras:{name:'Cerebras',ls:'bff_cerebras',base:'https://api.cerebras.ai/v1',hint:'csk-…',site:'cloud.cerebras.ai',
-    pref:['gpt-oss-120b','qwen-3.8-27b'], adult:['qwen-3.8-27b','gpt-oss-120b']},
 };
 // orden normal (rápido y estable) y orden +18 (del que menos se niega al que más; ver README)
-const ORDER={ normal:['groq','gemini','mistral','cerebras'], adult:['mistral','gemini','cerebras','groq'] };
+// Solo proveedores gratis SIN tarjeta (nov 2026): Mistral y Cerebras ya exigen pago/tarjeta para la API, se quitaron.
+const ORDER={ normal:['groq','gemini'], adult:['gemini','groq'] };
+try{ ['bff_mistral','bff_cerebras','bff_models_mistral','bff_models_cerebras'].forEach(k=>localStorage.removeItem(k)); }catch{}
 export const provKey=p=>cleanKey(LS.get(PROVIDERS[p].ls,''));
 export const anyKey=()=>Object.keys(PROVIDERS).some(p=>provKey(p));
 export class ProvErr extends Error{ constructor(prov,status,msg){ super(msg); this.prov=prov; this.status=status; } }

@@ -2,7 +2,7 @@ import { Renderer, Puppet, loadImage } from './rig.js';
 import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.3.0';
+const VERSION='1.3.1';
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -379,7 +379,7 @@ async function openSettings(){
    <p class="note" style="margin-top:-6px">Plática coqueta/subida de tono entre adultos, solo texto. Su ropa, poses y animaciones no cambian. Apagado por defecto.</p>
    <div class="row"><label>Llaves de IA (opcionales, gratis, se guardan solo en este cel)</label>
    ${Object.entries(PROVIDERS).map(([id,P])=>`<div class="kb"><span class="kn">${P.name}</span><input type="password" data-prov="${id}" placeholder="${P.hint}" autocomplete="off" autocapitalize="off" spellcheck="false" value="${provKey(id)?'••••••••':''}"><p class="note" id="kst-${id}">${provKey(id)?'Probando…':''}</p></div>`).join('')}
-   <p class="note">Sin llaves uso un servicio gratis sin registro (más lento y se niega más en +18). Saca llaves en console.groq.com, aistudio.google.com, console.mistral.ai o cloud.cerebras.ai.</p></div>
+   <p class="note">Sin llaves uso un servicio gratis sin registro (más lento y se niega más en +18). Llaves gratis sin tarjeta: console.groq.com y aistudio.google.com (Gemini). Mistral y Cerebras ya piden pago, por eso no están.</p></div>
    <div class="row"><button class="btn red" id="sReset">🔄 Reiniciar amistad</button><p class="note">Borra la plática y lo que ${esc(cfg.name)} sabe de ti. Todo se guarda solo en este dispositivo.</p></div>
    <div class="row sw-row"><label style="margin:0">Modo desarrollador</label><input type="checkbox" id="sDev" ${cfg.dev?'checked':''}></div>
    <div class="row" id="devBox" style="display:${cfg.dev?'block':'none'}"><label>Personalidad (solo dev)</label><textarea id="sPersona" placeholder="Vacío = personalidad normal">${esc(cfg.persona||'')}</textarea></div>
