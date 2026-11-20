@@ -79,3 +79,25 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
 body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,body.capture #hints{display:none!important}
 .kb{display:grid;grid-template-columns:78px 1fr;gap:4px 8px;align-items:center;margin:6px 0}.kb .kn{font-size:13px;opacity:.85}.kb .note{grid-column:1/3;margin:0}
 .m .meta .via.key{color:#9ff0b0}
+/* --- pulido v1.3 --- */
+#loader{background:#120a1a}
+#loader:before{content:"";position:absolute;inset:-20px;background:url(../img2/cuarto.webp) center/cover;filter:blur(14px) brightness(.45) saturate(1.2);transform:scale(1.05)}
+#loader>*{position:relative}
+#loader img{height:46vh;animation:float 2.4s ease-in-out infinite}
+#loader .ltag{font-size:13px;color:#e9d6f5cc;margin-top:-6px}
+@keyframes float{50%{transform:translateY(-8px)}}
+.m.new{animation:pop .22s ease-out both}.m.me{transform-origin:100% 100%}.m.her{transform-origin:0 100%}
+@keyframes pop{from{opacity:0;transform:scale(.92) translateY(6px)}to{opacity:1;transform:none}}
+#sheet .sh-in{transform:translateY(0);transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+#sheet.hide .sh-in{transform:translateY(40px)}
+#bubble{transition:opacity .25s,transform .25s}#bubble.hide{transform:translate(-50%,-90%)}
+#gear{transition:transform .3s}#gear:active{transform:rotate(60deg) scale(.92)}
+#bar button{transition:transform .12s}#bar button:active{transform:scale(.9)}
+.sh-in input[type=checkbox]{appearance:none;-webkit-appearance:none;flex:none;width:44px;height:26px;border-radius:13px;background:#ffffff26;position:relative;cursor:pointer;transition:background .2s;margin:0}
+.sh-in input[type=checkbox]:before{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px #0006}
+.sh-in input[type=checkbox]:checked{background:linear-gradient(90deg,#ff7ac6,#b98cff)}
+.sh-in input[type=checkbox]:checked:before{transform:translateX(18px)}
+.sh-in::-webkit-scrollbar{width:0}
+#chat header small{transition:color .2s}
+.card{transition:transform .15s,border-color .2s}.card:active{transform:scale(.96)}
+#hints span{font-weight:600;box-shadow:0 2px 10px #0006}

@@ -156,14 +156,14 @@ async function viaProvider(prov, messages, opts){
 }
 export class Wait extends Error{ constructor(s){ super('wait'); this.wait=s; } }
 async function polli(messages, opts={}){
-  const eps=['https://text.pollinations.ai/openai','https://gen.pollinations.ai/v1/chat/completions']; let err;
+  const eps=['https://text.pollinations.ai/openai']; let err; // gen.pollinations.ai ya exige llave (401), se quitó
   for(let i=0;i<3;i++){
-    const ep=eps[i%2]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),40000);
+    const ep=eps[0]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),40000);
     try{ const r=await fetch(ep,{method:'POST',signal:c.signal,headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:'openai',messages,temperature:opts.temperature??1, ...(i%2?{}:{private:true})})});
-      if(r.status===402||r.status===429){ const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); if(i%2===0) throw new Wait(mm?+mm[1]:45); continue; }
+        body:JSON.stringify({model:'openai',messages,temperature:opts.temperature??1, private:true})});
+      if(r.status===402||r.status===429){ const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); throw new Wait(mm?+mm[1]:45); }
       if(!r.ok) throw new Error('polli '+r.status); const d=await r.json(); const t=d.choices?.[0]?.message?.content; if(!t) throw new Error('vacío'); return t;
-    } catch(e){ if(e instanceof Wait) throw e; err=e; } finally{ clearTimeout(to); }
+    } catch(e){ if(e instanceof Wait) throw e; err=e; await new Promise(r=>setTimeout(r,1200*(i+1))); } finally{ clearTimeout(to); }
   } throw err||new Error('polli ocupado');
 }
 // cadena: proveedores con llave (en el orden del modo) -> Pollinations sin llave. En +18, una negativa pasa al siguiente.

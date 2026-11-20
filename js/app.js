@@ -2,7 +2,7 @@ import { Renderer, Puppet, loadImage } from './rig.js';
 import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.2.0';
+const VERSION='1.3.0';
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -11,7 +11,7 @@ const OUTFITS=[
   {id:'jeans',name:'Casual jeans'},
   {id:'hoodie',name:'Street hoodie'},
 ];
-let READY=['base'];
+let READY=['base','jeans','hoodie'];
 const HAIR=[['castaño',null,'#6b3a2a'],['negro',[0.07,0.25,0.42],'#1b1414'],['rubio',[0.11,0.95,1.9],'#e2c06a'],['pelirroja',[0.015,1.5,1.08],'#b8361e'],['rosa',[0.93,1.2,1.75],'#f28cc0'],['morado',[0.78,1.1,1.15],'#7a3fb0'],['azul',[0.6,1.1,1.1],'#2f5fb8'],['plateado',[0.65,0.12,2.4],'#c9ccd6'],['verde',[0.42,0.9,1.05],'#2f8f6a']];
 const EYES=[['café',null,'#7a4a33'],['azul',[0.58,1.2,1.2],'#3b7ddd'],['verde',[0.33,1.1,1.15],'#3ea65a'],['miel',[0.09,1.2,1.25],'#c98b2b'],['morado',[0.78,1.1,1.15],'#8c4fd1'],['rojo',[0.98,1.4,1.0],'#c3394b']];
 const EARS=[['jade',null,'#4f9a6c'],['oro',[0.12,1.3,1.3],'#d4a72c'],['plata',[0.6,0.08,1.7],'#cfd3da'],['rosa',[0.93,1.1,1.35],'#ef7fb6'],['zafiro',[0.6,1.2,1.1],'#3060c8'],['rubí',[0.0,1.3,1.0],'#b8202f']];
@@ -20,7 +20,7 @@ const EARS=[['jade',null,'#4f9a6c'],['oro',[0.12,1.3,1.3],'#d4a72c'],['plata',[0
 const SPOTS={ idle:{pose:'stand',phone:'phone',cx:646,top:64,foot:745}, bed:{pose:'bed',phone:'bedphone',cx:440,top:150,foot:690},
   desk:{pose:'desk',phone:null,cx:930,top:190,foot:690}, closet:{pose:'closet',phone:null,cx:625,top:84,foot:560} };
 const HOT={bed:[20,250,520,600],closet:[430,80,830,330],pc:[790,200,1248,640]};
-const CLIP_RECTS={"base-closet-idle":[502.4,43.6,786.9,828.6],"base-bed-idle":[284.5,34.4,786.9,828.6],"base-desk-idle":[497.8,41.3,1133.3,828.6],"base-idle-bed":[217.9,34.4,894.7,828.6],"base-idle-closet":[403.8,36.7,814.4,828.6],"base-idle-desk":[470.3,41.3,1153.9,828.6]};
+const CLIP_RECTS={"base-closet-idle":[502.4,43.6,786.9,828.6],"base-bed-idle":[284.5,34.4,786.9,828.6],"base-desk-idle":[497.8,41.3,1133.3,828.6],"base-idle-bed":[217.9,34.4,894.7,828.6],"base-idle-closet":[403.8,36.7,814.4,828.6],"base-idle-desk":[470.3,41.3,1153.9,828.6],"hoodie-closet-idle":[483.9,39.3,819.3,829.6],"hoodie-idle-closet":[400.2,41.0,825.7,828.0],"hoodie-bed-idle":[285.3,36.8,800.1,823.7],"hoodie-desk-idle":[488.9,38.9,1175.7,823.3],"jeans-closet-idle":[498.1,41.5,786.8,829.6],"jeans-bed-idle":[240.8,40.9,788.7,822.7],"hoodie-idle-desk":[468.7,41.1,1189.6,828.2],"jeans-desk-idle":[499.6,41.5,1189.6,826.9],"jeans-idle-closet":[475.4,38.7,783.8,826.8],"jeans-idle-bed":[300.1,38.6,788.1,826.9],"jeans-idle-desk":[484.7,43.3,1125.5,826.7],"hoodie-idle-bed":[293.3,38.7,814.4,827.9]};
 
 // ---------- estado ----------
 let cfg=Object.assign({name:'Vale',voice:'es_MX-claude-high',readAloud:false,dev:false,persona:''},LS.get('bff_cfg',{}));
@@ -123,7 +123,7 @@ function drawSpot(spot,alpha,lu){
   const f=b?her.phone:0;
   const place=p=>{ const L=p.L, desk=L.kind==='desk'; const hop=spot==='idle'? -Math.sin(her.hop*Math.PI)*8*(her.hop>0?1:0):0;
     return desk? {x:p.off[0],y:p.off[1],s:1} : {x:p.off[0]+L.cx,y:p.off[1]+L.footY+hop,s:1,sx:spot==='idle'?her.squash:1}; };
-  if(spot==='idle') R.drawShadow(S.cx,S.foot-2,150,22,cam,alpha*0.8);
+  if(spot==='idle'){ R.drawShadow(a.off[0]+a.L.cx,a.off[1]+a.L.footY-2,150,22,cam,alpha*0.8); } // sombra en los pies reales de cada atuendo
   if(f<0.999) a.draw(P,T,place(a),cam,alpha,lu);
   if(b&&f>0.001) b.draw(P,T,place(b),cam,alpha*f,lu);
 }
@@ -132,7 +132,8 @@ function draw(){
   R.drawBg(bgTex,ROOM.w,ROOM.h,cam,1,glow);
   const lu=lookUniforms();
   const vidOn = clip&&!clip.done&&clip.alpha>0;
-  const pupA = vidOn? 1-clip.alpha : 1;
+  // sin doble transparencia: la pose queda sólida debajo mientras el video entra/sale, y se oculta cuando el video está completo
+  const pupA = vidOn && !clip.ending && clip.alpha>=1 ? 0 : 1;
   if(pupA>0.003){
     if(fadeFrom&&fadeT<1){ drawSpot(fadeFrom,pupA*(1-fadeT),lu); drawSpot(her.spot,pupA*fadeT,lu); }
     else drawSpot(her.spot,pupA,lu);
@@ -181,7 +182,7 @@ function say(text,ms){ const b=$('#bubble'); b.textContent=text; b.classList.rem
 function placeBubble(){
   const b=$('#bubble'); if(performance.now()>bubbleUntil){ b.classList.add('hide'); return; }
   const S=SPOTS[her.spot]||SPOTS.idle; let X=S.cx, Y=S.top-14;
-  let [sx,sy]=toScreen(X,Y); if(sy<78){ const [rx]=toScreen(S.cx+150,0); sx=rx; sy=78; } b.style.left=Math.max(90,Math.min(innerWidth-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
+  let [sx,sy]=toScreen(X,Y); if(sy<78){ const [rx]=toScreen(S.cx+150,0); sx=rx; sy=78; } b.style.left=Math.max(cam.ax+90,Math.min(cam.ax+cam.aw-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
 }
 
 // ---------- chat UI ----------
@@ -195,7 +196,7 @@ function bubbleEl(m){
   m._el=d; return d;
 }
 function render(){ const box=$('#msgs'); box.innerHTML=''; for(const m of hist.slice(-60)) box.appendChild(bubbleEl(m)); box.scrollTop=box.scrollHeight; }
-function push(m){ m.ts=m.ts||Date.now(); hist.push(m); if(m.role!=='sys') saveHist(); const box=$('#msgs'); const t=box.querySelector('.typing'); box.insertBefore(bubbleEl(m),t); requestAnimationFrame(()=>box.scrollTop=box.scrollHeight); return m; }
+function push(m){ m.ts=m.ts||Date.now(); hist.push(m); if(m.role!=='sys') saveHist(); const box=$('#msgs'); const t=box.querySelector('.typing'); const el=bubbleEl(m); el.classList.add('new'); box.insertBefore(el,t); requestAnimationFrame(()=>box.scrollTop=box.scrollHeight); return m; }
 function setTyping(on){ herTyping=on; const box=$('#msgs'); let t=box.querySelector('.typing'); $('#cstatus').textContent=on?'escribiendo…':'en línea';
   if(on&&!t){ t=document.createElement('div'); t.className='typing'; t.innerHTML='<i></i><i></i><i></i>'; box.appendChild(t); box.scrollTop=box.scrollHeight; }
   if(!on&&t) t.remove(); }
@@ -291,7 +292,10 @@ function intro(){
 function showHints(){
   const h=$('#hints'); h.innerHTML=''; const items=[['bed','🛏️ Cama',230,330],['closet','👗 Clóset',500,150],['pc','💻 Compu',1000,270]];
   const els=items.map(([k,l,x,y])=>{ const s=document.createElement('span'); s.textContent=l; h.appendChild(s); return [s,x,y]; });
-  const upd=()=>{ for(const [s,x,y] of els){ const [sx,sy]=toScreen(x,y); s.style.left=sx+'px'; s.style.top=sy+'px'; s.style.display=(sx<10||sx>innerWidth-10||sy>cam.ah)?'none':''; } };
+  const upd=()=>{ const x0=cam.ax+52, x1=cam.ax+cam.aw-52; for(const [s,x,y] of els){ let [sx,sy]=toScreen(x,y); const l0=s.dataset.l||(s.dataset.l=s.textContent);
+      // fuera de cuadro: se pega al borde con flechita en vez de desaparecer
+      if(sx<x0){ s.textContent='← '+l0; sx=x0; } else if(sx>x1){ s.textContent=l0+' →'; sx=x1; } else s.textContent=l0;
+      sy=Math.min(Math.max(sy,cam.ay+70),cam.ay+cam.ah-30); s.style.left=sx+'px'; s.style.top=sy+'px'; } };
   const iv=setInterval(upd,100); upd(); setTimeout(()=>{ els.forEach(([s])=>s.style.opacity=0); setTimeout(()=>{ clearInterval(iv); h.innerHTML=''; },700); },6500);
 }
 
@@ -301,7 +305,7 @@ $('#gl').addEventListener('click',e=>{
   const [X,Y]=toRoom(e.clientX,e.clientY);
   // ¿la tocó a ella?
   const S=SPOTS[her.spot]; const pz=pup[S.pose+'-'+look.outfit];
-  if(pz&&!(clip&&!clip.done)){ const [x0,y0]=pz.off; if(X>x0+20&&X<x0+pz.w-20&&Y>y0&&Y<S.foot) return poke(); }
+  if(pz&&!(clip&&!clip.done)){ const [x0,y0]=pz.off; if(X>x0+20&&X<x0+pz.w-20&&Y>y0&&Y<(pz.h?y0+pz.h:S.foot)) return poke(); }
   const inR=(r)=>X>=r[0]&&X<=r[2]&&Y>=r[1]&&Y<=r[3];
   if(inR(HOT.pc)){ if(busy) return; $('#txt').value='Investiga '; $('#txt').focus(); say('¿Qué investigo? 🤓',2500); goDesk(); return; }
   if(inR(HOT.bed)){ if(her.spot==='bed'){ say(pick(['Aquí estoy bien echadita 😌','¿Qué, te vienes a echar el chisme? 😂']),2200); return; } goSpot('bed').then(()=>say(pick(['Ahh, qué rica camita 😌','Me echo tantito, ¿va?']),2200)); return; }
