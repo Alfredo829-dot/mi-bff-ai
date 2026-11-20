@@ -76,3 +76,4 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
 .prog{height:6px;background:#ffffff1a;border-radius:6px;overflow:hidden;margin-top:6px}.prog i{display:block;height:100%;width:0;background:#ff7ac6}
 
 .m .meta .via{font-size:10px;opacity:.8;margin-right:4px}.m .meta .via.respaldo{color:#ffd27a}.m .meta .via.groq{color:#9ff0b0}
+body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,body.capture #hints{display:none!important}

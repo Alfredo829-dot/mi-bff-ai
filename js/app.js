@@ -2,63 +2,59 @@ import { Renderer, Puppet, loadImage } from './rig.js';
 import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, groqErrText, groqModels } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.0.1';
+const VERSION='1.1.0';
 const $=s=>document.querySelector(s);
-const ROOM={w:1168,h:784};
-// ---------- catálogo (agregar más outfits aquí) ----------
+const ROOM={w:1248,h:832};
+// ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
 const OUTFITS=[
   {id:'base',name:'Rosa coqueta'},
   {id:'jeans',name:'Casual jeans'},
-  {id:'pijama',name:'Pijama'},
   {id:'hoodie',name:'Street hoodie'},
 ];
+let READY=['base'];
 const HAIR=[['castaño',null,'#6b3a2a'],['negro',[0.07,0.25,0.42],'#1b1414'],['rubio',[0.11,0.95,1.9],'#e2c06a'],['pelirroja',[0.015,1.5,1.08],'#b8361e'],['rosa',[0.93,1.2,1.75],'#f28cc0'],['morado',[0.78,1.1,1.15],'#7a3fb0'],['azul',[0.6,1.1,1.1],'#2f5fb8'],['plateado',[0.65,0.12,2.4],'#c9ccd6'],['verde',[0.42,0.9,1.05],'#2f8f6a']];
-const EYES=[['rojo',null,'#c3394b'],['azul',[0.58,1.2,1.2],'#3b7ddd'],['verde',[0.33,1.1,1.15],'#3ea65a'],['miel',[0.09,1.2,1.25],'#c98b2b'],['morado',[0.78,1.1,1.15],'#8c4fd1'],['gris',[0.6,0.18,1.3],'#8a909c']];
+const EYES=[['café',null,'#7a4a33'],['azul',[0.58,1.2,1.2],'#3b7ddd'],['verde',[0.33,1.1,1.15],'#3ea65a'],['miel',[0.09,1.2,1.25],'#c98b2b'],['morado',[0.78,1.1,1.15],'#8c4fd1'],['rojo',[0.98,1.4,1.0],'#c3394b']];
 const EARS=[['jade',null,'#4f9a6c'],['oro',[0.12,1.3,1.3],'#d4a72c'],['plata',[0.6,0.08,1.7],'#cfd3da'],['rosa',[0.93,1.1,1.35],'#ef7fb6'],['zafiro',[0.6,1.2,1.1],'#3060c8'],['rubí',[0.0,1.3,1.0],'#b8202f']];
-// ---------- landmarks (px dentro de cada imagen) ----------
-const L_STAND={kind:'body',cx:262,neckY:245,shoulderY:290,waistY:480,legTop:650,kneeY:917,footY:1228,armL:[140,188],armR:[342,388],handY:715,
-  eyes:[[241,137],[298,154]],eyeR:[15,10],eyeAng:0.29,mouth:[262,191],mouthW:16,cheek:[230,160]};
-const L_PHONE={...L_STAND,armL:null,armR:null,thumbs:[318,330],eyes:[[241,137],[294,153]],mouth:[261,189]};
-const L_SIT={kind:'body',cx:205,neckY:228,shoulderY:275,waistY:410,legTop:647,kneeY:647,footY:1114,armL:null,armR:null,handY:0,
-  eyes:[[194,124],[246,139]],eyeR:[14,9],eyeAng:0.265,mouth:[214,173],mouthW:16,cheek:[187,150]};
-const L_SITPHONE={...L_SIT,thumbs:[285,315]};
-const L_DESK={kind:'desk',neckY:189,neck:[243,189],headX0:150,hands:[418,424]};
-const SPOT={idle:{x:590,y:648},bed:{x:300,y:612},closet:{x:650,y:540},desk:{x:740,y:630}};
-const DESK_PLACE={x:792,y:223,s:0.435};
-const HOT={bed:[0,300,425,620],closet:[525,103,776,470],pc:[787,240,1168,640]};
-const scaleAt=y=>0.40*(y-260)/(648-260);
-const herH=()=>1228*scaleAt(her.y)*(1-P.sit*0.22);
-const SIT_RATIO=0.78; // sentada mide ~78% de su altura de pie
-const sitScale=y=>1228*scaleAt(y)*SIT_RATIO/1100;
+// ---------- escena: cuarto fijo (cámara fija) y poses en su lugar exacto ----------
+// cada lugar tiene su pose (y la variante con cel); los traslados son clips de video recortados con alfa
+const SPOTS={ idle:{pose:'stand',phone:'phone',cx:646,top:64,foot:745}, bed:{pose:'bed',phone:'bedphone',cx:440,top:150,foot:690},
+  desk:{pose:'desk',phone:null,cx:930,top:190,foot:690}, closet:{pose:'closet',phone:null,cx:625,top:84,foot:560} };
+const HOT={bed:[20,250,520,600],closet:[430,80,830,330],pc:[790,200,1248,640]};
+const CLIP_RECTS={"base-closet-idle":[502.4,43.6,786.9,828.6],"base-bed-idle":[284.5,34.4,786.9,828.6],"base-desk-idle":[497.8,41.3,1133.3,828.6],"base-idle-bed":[217.9,34.4,894.7,828.6],"base-idle-closet":[403.8,36.7,814.4,828.6],"base-idle-desk":[470.3,41.3,1153.9,828.6]};
 
 // ---------- estado ----------
 let cfg=Object.assign({name:'Vale',voice:'es_MX-claude-high',readAloud:false,dev:false,persona:''},LS.get('bff_cfg',{}));
 let look=Object.assign({outfit:'base',hair:0,eye:0,ear:0},LS.get('bff_look',{}));
+if(!READY.includes(look.outfit)) look.outfit='base';
+if(!LS.get('bff_v2',false)){ look.eye=0; LS.set('bff_v2',true); }
 let hist=LS.get('bff_hist',[]);
 const saveCfg=()=>LS.set('bff_cfg',cfg), saveLook=()=>LS.set('bff_look',look), saveHist=()=>LS.set('bff_hist',hist.slice(-200));
 const R=new Renderer($('#gl'));
-const tex={}; let bgTex, pup={};
-const her={x:SPOT.idle.x,y:SPOT.idle.y,spot:'idle',mode:'stand',sit:0,sitT:0,phone:0,phoneT:0,desk:0,deskT:0,walking:false,dir:1,squash:1,hop:0};
+let bgTex, pup={}, meta={};
+const her={spot:'idle',mode:'stand',phone:0,phoneT:0,show:1,squash:1,hop:0,typingDesk:false,walking:false};
 const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,walk:0,walkPhase:0,sit:0,typing:0,open:0};
 const G={tilt:0,nod:0,armL:0,armR:0,turn:0}; let gestT=0;
 let talking=false, fakeTalkUntil=0, herTyping=false, userTyping=0, voiceMode=false, busy=false, lastPoke=0;
-let cam={k:1,cx:600,cy:470,ax:0,ay:0,aw:1,ah:1}, camX=SPOT.idle.x, camY=420;
+let cam={k:1,cx:646,cy:416,ax:0,ay:0,aw:1,ah:1}, camX=SPOTS.idle.cx, camY=416, fadeFrom=null, fadeT=1;
 
 // ---------- carga ----------
 const prog=p=>{ $('#loader .lbar i').style.width=Math.round(p*100)+'%'; };
-async function loadOutfit(id, withDesk=false){
-  const need=[['stand',L_STAND],['phone',L_PHONE]]; if(withDesk) need.push(['sit',L_SIT],['sitphone',L_SITPHONE],['desk',L_DESK]);
-  for(const [k,L] of need){ const key=k+'-'+id; if(pup[key]) continue;
-    const [im,mk]=await Promise.all([loadImage(`img/${key}.webp`),loadImage(`img/${key}-m.png`)]); pup[key]=new Puppet(R,im,mk,L, k==='desk'?14:18, k==='desk'?20:(k.startsWith('sit')?40:44)); }
+async function loadMeta(id){ if(!meta[id]) meta[id]=await fetch(`img2/poses-${id}.json`).then(r=>r.json()); return meta[id]; }
+async function loadOutfit(id, all=false){
+  const M=await loadMeta(id); const need=all? Object.keys(M) : ['stand','phone'];
+  await Promise.all(need.map(async k=>{ const key=k+'-'+id; if(pup[key]||!M[k]) return;
+    const [im,mk]=await Promise.all([loadImage(`img2/${key}.webp`),loadImage(`img2/${key}-m.png`)]);
+    const L=M[k].L, desk=L.kind==='desk'; pup[key]=new Puppet(R,im,mk,L, desk?14:16, desk?20:40); pup[key].off=M[k].off; }));
 }
 async function boot(){
   try{
-    prog(0.1); const bg=await loadImage('img/cuarto.webp'); bgTex=R.texture(bg,true); prog(0.45);
+    prog(0.1); const bg=await loadImage('img2/cuarto.webp'); bgTex=R.texture(bg,true); prog(0.45);
     await loadOutfit(look.outfit); prog(1);
   }catch(e){ $('#loader .lname').textContent='No pude cargar 😢 recarga'; console.error(e); return; }
   layout(); requestAnimationFrame(frame);
-  setTimeout(()=>{ $('#loader').classList.add('out'); intro(); },150);
+  setTimeout(()=>{ $('#loader').classList.add('out'); if(!CAPTURE) intro(); },150);
   loadOutfit(look.outfit,true).catch(()=>{});
+  if(!CAPTURE) setTimeout(()=>preloadClips(),2500);
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
 
@@ -69,15 +65,19 @@ function layout(){
   let ax=0,ay=0,aw=W,ah=H-barH;
   if(land){ const pw=Math.min(400,Math.round(W*0.38)); document.body.style.setProperty('--panelW',pw+'px'); if(!voiceMode) aw=W-pw; ah=H; }
   else { const ch=voiceMode?0:Math.round(H*0.40); document.body.style.setProperty('--chatH',ch+'px'); document.body.style.setProperty('--capH',ch+'px'); ah=H-barH-(voiceMode?0:ch-12); }
-  let k=land? Math.max(aw/ROOM.w, ah/ROOM.h) : Math.max(aw/ROOM.w, ah/(voiceMode?560:620));
+  if(CAPTURE){ ax=0; ay=0; aw=W; ah=H; }
+  const k=Math.max(aw/ROOM.w, ah/ROOM.h);
   cam={...cam,k,ax,ay,aw,ah};
 }
+function spotX(s){ return (SPOTS[s]||SPOTS.idle).cx; }
 function updateCam(dt){
   const halfW=cam.aw/2/cam.k, halfH=cam.ah/2/cam.k;
-  const target = her.desk>0.5? 900 : her.x;
-  camX+=(target-camX)*Math.min(1,dt*2.2);
+  let tx=spotX(her.spot), top=SPOTS[her.spot]?.top??64;
+  if(clip&&!clip.done&&clip.v.duration){ const k=Math.min(1,clip.v.currentTime/clip.v.duration), e=k*k*(3-2*k); tx=spotX(clip.a)+(spotX(clip.b)-spotX(clip.a))*e; top=Math.min(SPOTS[clip.a].top,SPOTS[clip.b].top); }
+  camX+=(tx-camX)*Math.min(1,dt*(clip&&!clip.done?4.5:2.4));
   cam.cx=Math.min(Math.max(camX,halfW),ROOM.w-halfW); if(halfW*2>=ROOM.w) cam.cx=ROOM.w/2;
-  const wantY= her.desk>0.5? 430 : her.y-herH()*0.5-14; camY+=(wantY-camY)*Math.min(1,dt*2.2); cam.cy=Math.min(Math.max(camY,halfH),ROOM.h-halfH); if(halfH*2>=ROOM.h) cam.cy=ROOM.h/2;
+  const wantY=Math.max(halfH, top-26+halfH); camY+=(wantY-camY)*Math.min(1,dt*2.4);
+  cam.cy=Math.min(Math.max(camY,halfH),ROOM.h-halfH); if(halfH*2>=ROOM.h) cam.cy=ROOM.h/2;
 }
 const toScreen=(X,Y)=>[(X-cam.cx)*cam.k+cam.ax+cam.aw/2,(Y-cam.cy)*cam.k+cam.ay+cam.ah/2];
 const toRoom=(sx,sy)=>[(sx-cam.ax-cam.aw/2)/cam.k+cam.cx,(sy-cam.ay-cam.ah/2)/cam.k+cam.cy];
@@ -85,98 +85,103 @@ addEventListener('resize',()=>{ layout(); });
 if(window.visualViewport) visualViewport.addEventListener('resize',()=>{ document.getElementById('app').style.height=visualViewport.height+'px'; layout(); });
 
 // ---------- animación ----------
-let last=performance.now(), T=0, nextBlink=1.5, blinkT=-1, dbl=false;
-const lerp=(a,b,t)=>a+(b-a)*t, ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+let last=performance.now(), T=0, nextBlink=/capture=1/.test(location.search)?1e9:1.5, blinkT=-1, dbl=false;
+const lerp=(a,b,t)=>a+(b-a)*t;
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now; T+=dt;
-  // parpadeo
   if(T>nextBlink&&blinkT<0){ blinkT=0; }
   if(blinkT>=0){ blinkT+=dt; const d=0.16; P.blink=blinkT<d/2? blinkT/(d/2) : Math.max(0,1-(blinkT-d/2)/(d/2)); if(blinkT>d){ blinkT=-1; P.blink=0; if(!dbl&&Math.random()<0.2){ dbl=true; nextBlink=T+0.12; } else { dbl=false; nextBlink=T+2+Math.random()*3.5; } } }
-  // respiración, peso, pelo
   P.breath=Math.sin(T*1.55)*(talking?1.2:1);
-  P.hip=Math.sin(T*0.45)*4.5+Math.sin(T*0.17)*2; P.lean=-P.hip*0.0016;
-  P.hairAmp=her.walking?2.2:1; P.hairWind=lerp(P.hairWind, her.walking? -her.dir*5:0, dt*3);
-  // gestos al hablar
+  const still=her.spot!=='idle'; // en cama/compu/clóset es un parche del cuadro: menos vaivén
+  P.hip=(Math.sin(T*0.45)*2.6+Math.sin(T*0.17)*1.2)*(still?0.25:1); P.lean=-P.hip*0.0012;
+  P.hairAmp=0.7; P.hairWind=0;
   const isTalk=talking||T<fakeTalkUntil;
   gestT-=dt; if(gestT<=0){ gestT=0.45+Math.random()*0.7;
-    if(isTalk){ G.tilt=(Math.random()-.5)*0.12; G.nod=Math.random()<0.5?0.9:0; G.armL=(Math.random()-.5)*0.08; G.armR=(Math.random()-.5)*0.08; G.turn=(Math.random()-.5)*0.6; }
-    else { G.tilt=(Math.random()-.5)*0.05; G.nod=0; G.armL=0; G.armR=0; G.turn=(Math.random()-.5)*0.25; } }
+    if(isTalk){ G.tilt=(Math.random()-.5)*0.09; G.nod=Math.random()<0.5?0.8:0; G.armL=(Math.random()-.5)*0.06; G.armR=(Math.random()-.5)*0.06; G.turn=(Math.random()-.5)*0.5; }
+    else { G.tilt=(Math.random()-.5)*0.04; G.nod=0; G.armL=0; G.armR=0; G.turn=(Math.random()-.5)*0.2; } }
   const ph=her.phone;
-  const tiltT=G.tilt+Math.sin(T*0.6)*0.025+Math.sin(T*1.7)*0.01 + her.hop*0.06 + ph*0.05;
-  P.headTilt=lerp(P.headTilt,tiltT,dt*3); P.nod=lerp(P.nod,(isTalk?G.nod*Math.max(0,Math.sin(T*7)):0)+ph*1.4,dt*6); P.headTurn=lerp(P.headTurn,G.turn,dt*2.5);
-  P.armL=lerp(P.armL,G.armL+Math.sin(T*0.9)*0.012,dt*3); P.armR=lerp(P.armR,G.armR-Math.sin(T*0.8)*0.012,dt*3);
-  // boca
+  const tiltT=G.tilt+Math.sin(T*0.6)*0.02+Math.sin(T*1.7)*0.008 + her.hop*0.05;
+  P.headTilt=lerp(P.headTilt,tiltT,dt*3); P.nod=lerp(P.nod,(isTalk?G.nod*Math.max(0,Math.sin(T*7)):0)+ph*0.4,dt*6); P.headTurn=lerp(P.headTurn,G.turn*0.6,dt*2.5);
+  P.armL=lerp(P.armL,G.armL+Math.sin(T*0.9)*0.01,dt*3); P.armR=lerp(P.armR,G.armR-Math.sin(T*0.8)*0.01,dt*3);
   let open=0; if(talking) open=V.audioLevel(); else if(T<fakeTalkUntil) open=Math.max(0,Math.sin(T*15)*0.5+Math.sin(T*23)*0.3+0.15);
   P.open=lerp(P.open,Math.min(1,open),dt*18);
-  // escribir en el cel
-  her.phoneT = (!voiceMode && her.mode!=='desk' && !her.walking && (herTyping||userTyping>T||busy)) ? 1 : (her.phoneHold>T?1:0);
+  const hasPhone=!!SPOTS[her.spot]?.phone;
+  her.phoneT = hasPhone && !voiceMode && !moving_now && ((herTyping||userTyping>T||busy) || her.phoneHold>T) ? 1 : 0;
   her.phone=lerp(her.phone,her.phoneT,dt*5); if(Math.abs(her.phone-her.phoneT)<0.01) her.phone=her.phoneT;
-  P.typing=lerp(P.typing,(herTyping&&her.phone>0.6)||(her.mode==='desk'&&her.typingDesk)?1:0,dt*6);
-  // sentarse
-  her.sit=lerp(her.sit,her.sitT,dt*3.2); if(Math.abs(her.sit-her.sitT)<0.005) her.sit=her.sitT; P.sit=ease(her.sit);
-  her.desk=lerp(her.desk,her.deskT,dt*5); if(Math.abs(her.desk-her.deskT)<0.01) her.desk=her.deskT;
-  her.hop=Math.max(0,her.hop-dt*2.2);
-  if(her.walking){ P.walk=lerp(P.walk,1,dt*8); P.walkPhase+=dt*9.5; } else { P.walk=lerp(P.walk,0,dt*8); }
-  her.squash=lerp(her.squash,1,dt*6);
+  P.typing=lerp(P.typing,(herTyping&&her.phone>0.6)||(her.spot==='desk'&&her.typingDesk)?1:0,dt*6);
+  her.hop=Math.max(0,her.hop-dt*2.2); her.squash=lerp(her.squash,1,dt*6);
+  fadeT=Math.min(1,fadeT+dt*2.5);
   updateCam(dt);
   draw();
   placeBubble();
   requestAnimationFrame(frame);
 }
-function lookUniforms(){ return { hair:HAIR[look.hair][1], eye:EYES[look.eye][1], ear:EARS[look.ear][1], tint:[1.0,0.97,0.98] }; }
+function lookUniforms(){ return { hair:HAIR[look.hair][1], eye:EYES[look.eye][1], ear:EARS[look.ear][1], tint:[1,1,1] }; }
+function drawSpot(spot,alpha,lu){
+  const S=SPOTS[spot]; if(!S||alpha<=0.003) return;
+  const a=pup[S.pose+'-'+look.outfit], b=S.phone&&pup[S.phone+'-'+look.outfit]; if(!a) return;
+  const f=b?her.phone:0;
+  const place=p=>{ const L=p.L, desk=L.kind==='desk'; const hop=spot==='idle'? -Math.sin(her.hop*Math.PI)*8*(her.hop>0?1:0):0;
+    return desk? {x:p.off[0],y:p.off[1],s:1} : {x:p.off[0]+L.cx,y:p.off[1]+L.footY+hop,s:1,sx:spot==='idle'?her.squash:1}; };
+  if(spot==='idle') R.drawShadow(S.cx,S.foot-2,150,22,cam,alpha*0.8);
+  if(f<0.999) a.draw(P,T,place(a),cam,alpha,lu);
+  if(b&&f>0.001) b.draw(P,T,place(b),cam,alpha*f,lu);
+}
 function draw(){
-  R.clear(); const glow= her.desk>0.3? [0.83,0.38,0.12+0.01*Math.sin(T*20),0.09] : null;
+  R.clear(); const glow= her.spot==='desk'&&her.typingDesk? [0.75,0.33,0.10+0.01*Math.sin(T*20),0.09] : null;
   R.drawBg(bgTex,ROOM.w,ROOM.h,cam,1,glow);
-  const lu=lookUniforms(); const s=scaleAt(her.y);
-  const bob = her.walking? -Math.abs(Math.sin(P.walkPhase))*6*s/0.29 : 0;
-  const hop = -Math.sin(her.hop*Math.PI)*14*s/0.29*(her.hop>0?1:0);
-  const bodyA=1-her.desk;
-  if(bodyA>0.01){
-    R.drawShadow(her.x,her.y+2,170*s/0.29*(1-P.sit*0.1),26*s/0.29,cam,bodyA);
-    const place={x:her.x,y:her.y+bob+hop,s,sx:her.squash*(her.flip||1)};
-    const sitW=Math.min(1,Math.max(0,(P.sit-0.3)/0.4)); const f=her.phone;
-    // de pie (se inclina un poco al sentarse) y pose real sentada con fundido
-    const Ps={...P,sit:Math.min(P.sit,0.45)*0.6};
-    const a=pup['stand-'+look.outfit], b=pup['phone-'+look.outfit];
-    const standA=bodyA*(1-sitW);
-    if(standA>0.003){ if(a&&f<0.999) a.draw(Ps,T,place,cam,standA,lu); if(b&&f>0.001) b.draw(Ps,T,place,cam,standA*f,lu); }
-    const sa=pup['sit-'+look.outfit], sb=pup['sitphone-'+look.outfit];
-    const sitA=bodyA*sitW;
-    if(sitA>0.003 && sa){ const Pq={...P,sit:0,walk:0,hip:P.hip*0.25,lean:P.lean*0.5}; const sp={x:her.x,y:her.y+hop*0.3,s:sitScale(her.y),sx:her.squash*(her.flip||1)};
-      if(f<0.999) sa.draw(Pq,T,sp,cam,sitA,lu); if(sb&&f>0.001) sb.draw(Pq,T,sp,cam,sitA*f,lu); }
-    else if(sitA>0.003){ if(a) a.draw(P,T,place,cam,sitA,lu); }
+  const lu=lookUniforms();
+  const vidOn = clip&&!clip.done&&clip.alpha>0;
+  const pupA = vidOn? 1-clip.alpha : 1;
+  if(pupA>0.003){
+    if(fadeFrom&&fadeT<1){ drawSpot(fadeFrom,pupA*(1-fadeT),lu); drawSpot(her.spot,pupA*fadeT,lu); }
+    else drawSpot(her.spot,pupA,lu);
   }
-  const d=pup['desk-'+look.outfit]; if(d&&her.desk>0.01) d.draw(P,T,DESK_PLACE,cam,her.desk,lu);
+  if(clip&&!clip.done){ const v=clip.v; if(v.readyState>=2 && R.updateVideo(clip.tex,v)){ clip.ready=true; } if(clip.ready){ clip.alpha=clip.ending? Math.max(0,clip.alpha-0.12) : Math.min(1,clip.alpha+0.34); R.drawVideo(clip.tex,clip.rect,cam,clip.alpha); } }
 }
 
-// ---------- movimientos ----------
+// ---------- traslados: clips de video con alfa (color arriba, alfa abajo) sobre el cuarto fijo ----------
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function walkTo(x,y){
-  if(her.sitT>0){ her.sitT=0; await sleep(450); }
-  const dx=x-her.x, dy=y-her.y, dist=Math.hypot(dx,dy); if(dist<6) return;
-  her.dir=Math.sign(dx)||1; her.walking=true; const sp=300, dur=dist/sp*1000, x0=her.x,y0=her.y, t0=performance.now();
-  await new Promise(res=>{ const st=()=>{ const k=Math.min(1,(performance.now()-t0)/dur); const e=k<.15? k*k/.15/2 : k; her.x=x0+dx*Math.min(1,e); her.y=y0+dy*Math.min(1,e); P.lean=her.dir*0.04; if(k<1) requestAnimationFrame(st); else res(); }; st(); });
-  her.walking=false;
+const clipURL={}; let clip=null, moving=Promise.resolve(), moving_now=false;
+function clipKey(a,b,o=look.outfit){ return `${o}-${a}-${b}`; }
+async function fetchClip(k){ if(!CLIP_RECTS[k]) return null; if(clipURL[k]) return clipURL[k];
+  clipURL[k]=fetch(`clips2/${k}.mp4`).then(r=>{ if(!r.ok) throw 0; return r.blob(); }).then(b=>URL.createObjectURL(b)).catch(()=>{ delete clipURL[k]; return null; });
+  return clipURL[k]; }
+function preloadClips(o=look.outfit){ const ks=[]; for(const s of ['desk','bed','closet']) ks.push(clipKey('idle',s,o),clipKey(s,'idle',o));
+  ks.reduce((p,k)=>p.then(()=>fetchClip(k)),Promise.resolve()); }
+async function playClip(a,b){
+  const k=clipKey(a,b); const url=await Promise.race([fetchClip(k), sleep(7000).then(()=>null)]); if(!url) return false;
+  const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.setAttribute('playsinline',''); v.setAttribute('muted',''); v.preload='auto'; v.src=url;
+  try{ await new Promise((res,rej)=>{ v.oncanplay=res; v.onerror=rej; setTimeout(rej,7000); }); await v.play(); }catch(e){ return false; }
+  const tex=clip?.tex||R.videoTexture();
+  clip={v,tex,alpha:0,a,b,rect:CLIP_RECTS[k],ending:false,ready:false};
+  her.phone=her.phoneT=0;
+  await new Promise(res=>{ v.onended=res; setTimeout(res,(v.duration||6)*1000+1500); });
+  her.spot=b; her.mode=b==='desk'?'desk':b==='bed'?'sit':'stand'; fadeFrom=null; fadeT=1;
+  clip.ending=true; await sleep(260); clip.v.pause(); clip.alpha=0; clip.done=true; return true;
 }
-async function goSpot(name){
-  if(her.mode==='desk') await leaveDesk();
-  const s=SPOT[name]; await walkTo(s.x,s.y); her.spot=name;
-  if(name==='bed'){ await loadOutfit(look.outfit,true).catch(()=>{}); her.sitT=1; her.mode='sit'; } else her.mode='stand';
+function crossTo(b){ fadeFrom=her.spot; fadeT=0; her.spot=b; her.mode=b==='desk'?'desk':b==='bed'?'sit':'stand'; return sleep(450); }
+function stateSpot(){ return her.spot; }
+function goSpot(name){ moving=moving.then(()=>_goSpot(name)).catch(()=>{}); return moving; }
+async function _goSpot(name){
+  const from=her.spot; if(from===name) return;
+  moving_now=true; her.typingDesk=false;
+  try{
+    await loadOutfit(look.outfit,true).catch(()=>{});
+    const legs=(from!=='idle'&&name!=='idle')? [[from,'idle'],['idle',name]] : [[from,name]];
+    for(const [a,b] of legs){ if(!(await playClip(a,b))) await crossTo(b); }
+  } finally { moving_now=false; }
 }
-async function goDesk(){
-  if(her.mode==='desk') return; await walkTo(SPOT.desk.x,SPOT.desk.y);
-  await loadOutfit(look.outfit,true).catch(()=>{}); her.deskT=1; her.mode='desk'; await sleep(450);
-}
-async function leaveDesk(){ if(her.mode!=='desk') return; her.typingDesk=false; her.deskT=0; await sleep(400); her.mode='stand'; her.x=SPOT.desk.x; her.y=SPOT.desk.y; }
+async function goDesk(){ if(her.spot==='desk') return; await goSpot('desk'); }
+async function leaveDesk(){ if(her.spot!=='desk') return; her.typingDesk=false; await goSpot('idle'); }
 
 // ---------- burbuja sobre su cabeza ----------
 let bubbleUntil=0;
 function say(text,ms){ const b=$('#bubble'); b.textContent=text; b.classList.remove('hide'); bubbleUntil=performance.now()+(ms||Math.min(9000,1800+text.length*55)); }
 function placeBubble(){
   const b=$('#bubble'); if(performance.now()>bubbleUntil){ b.classList.add('hide'); return; }
-  let X=her.x, Y=her.y-herH()-20*scaleAt(her.y);
-  if(her.desk>0.5){ X=DESK_PLACE.x+240*DESK_PLACE.s; Y=DESK_PLACE.y+60*DESK_PLACE.s; }
-  const [sx,sy]=toScreen(X,Y); b.style.left=Math.max(90,Math.min(innerWidth-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
+  const S=SPOTS[her.spot]||SPOTS.idle; let X=S.cx, Y=S.top-14;
+  let [sx,sy]=toScreen(X,Y); if(sy<78){ const [rx]=toScreen(S.cx+150,0); sx=rx; sy=78; } b.style.left=Math.max(90,Math.min(innerWidth-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
 }
 
 // ---------- chat UI ----------
@@ -269,7 +274,7 @@ async function research(q,orig){
   let r=await askAI(chatMsgs(extra)); if(/se me trabó|se me fue el internet/.test(r.text)&&found.length) r={text:`Mira, encontré esto: ${found[0].text.slice(0,260)}…`};
   await sleep(900); setTyping(false); her.typingDesk=false;
   r.links=found.map(f=>({title:f.title,url:f.url}));
-  const done=reply(r); await sleep(1600); await leaveDesk(); goSpot(prevSpot); await done;
+  const done=reply(r); await sleep(1600); goSpot(prevSpot); await done;
 }
 
 // ---------- intro ----------
@@ -283,7 +288,7 @@ function intro(){
   setTimeout(()=>{ setTyping(false); push({role:'assistant',content:line}); fakeTalkUntil=T+0.8; if(first) showHints(); },1300);
 }
 function showHints(){
-  const h=$('#hints'); h.innerHTML=''; const items=[['bed','🛏️ Cama',212,380],['closet','👗 Clóset',650,250],['pc','💻 Compu',880,300]];
+  const h=$('#hints'); h.innerHTML=''; const items=[['bed','🛏️ Cama',230,330],['closet','👗 Clóset',500,150],['pc','💻 Compu',1000,270]];
   const els=items.map(([k,l,x,y])=>{ const s=document.createElement('span'); s.textContent=l; h.appendChild(s); return [s,x,y]; });
   const upd=()=>{ for(const [s,x,y] of els){ const [sx,sy]=toScreen(x,y); s.style.left=sx+'px'; s.style.top=sy+'px'; s.style.display=(sx<10||sx>innerWidth-10||sy>cam.ah)?'none':''; } };
   const iv=setInterval(upd,100); upd(); setTimeout(()=>{ els.forEach(([s])=>s.style.opacity=0); setTimeout(()=>{ clearInterval(iv); h.innerHTML=''; },700); },6500);
@@ -294,14 +299,13 @@ $('#gl').addEventListener('click',e=>{
   V.unlockAudio(); if(busy&&her.mode==='desk') return;
   const [X,Y]=toRoom(e.clientX,e.clientY);
   // ¿la tocó a ella?
-  const s=scaleAt(her.y), hh=herH(), hw=200*s;
-  if(her.desk<0.5 && Math.abs(X-her.x)<hw && Y<her.y && Y>her.y-hh){ return poke(); }
+  const S=SPOTS[her.spot]; const pz=pup[S.pose+'-'+look.outfit];
+  if(pz&&!(clip&&!clip.done)){ const [x0,y0]=pz.off; if(X>x0+20&&X<x0+pz.w-20&&Y>y0&&Y<S.foot) return poke(); }
   const inR=(r)=>X>=r[0]&&X<=r[2]&&Y>=r[1]&&Y<=r[3];
-  if(inR(HOT.closet)) return openCloset(true);
   if(inR(HOT.pc)){ if(busy) return; $('#txt').value='Investiga '; $('#txt').focus(); say('¿Qué investigo? 🤓',2500); goDesk(); return; }
   if(inR(HOT.bed)){ if(her.spot==='bed'){ say(pick(['Aquí estoy bien echadita 😌','¿Qué, te vienes a echar el chisme? 😂']),2200); return; } goSpot('bed').then(()=>say(pick(['Ahh, qué rica camita 😌','Me echo tantito, ¿va?']),2200)); return; }
-  if(Y>480 && !busy){ if(her.mode==='desk') leaveDesk().then(()=>walkTo(Math.max(120,Math.min(1080,X)),Math.min(700,Y)));
-    else walkTo(Math.max(120,Math.min(1080,X)),Math.min(700,Math.max(520,Y))).then(()=>{ her.spot='idle'; her.mode='stand'; }); }
+  if(inR(HOT.closet)) return openCloset(true);
+  if(Y>560 && her.spot!=='idle' && !busy) goSpot('idle');
 });
 function poke(){ const t=performance.now(); if(t-lastPoke<800) return; lastPoke=t; her.hop=1; her.squash=0.94; G.tilt=(Math.random()-.5)*0.2;
   const l=pick(['¡Ay, qué! 😂','¿Qué me ves? 😏','Jajaja no me piques 🙈','¿Mande? 👀','Oye, respeta 😤 jaja']); say(l,1800); fakeTalkUntil=T+0.9; }
@@ -343,15 +347,15 @@ async function openCloset(walk){
   if(walk&&!busy){ goSpot('closet').then(()=>say(pick(['¿Qué me pongo? 👗','A ver, escógeme algo chido 😏']),2200)); }
   let tab='ropa';
   const html=()=>`<div class="tabs">${[['ropa','👗 Ropa'],['pelo','💇 Cabello'],['ojos','👁️ Ojos'],['aretes','💎 Aretes']].map(([k,l])=>`<button data-tab="${k}" class="${tab===k?'on':''}">${l}</button>`).join('')}</div>
-   ${tab==='ropa'? `<div class="grid">${OUTFITS.map(o=>`<button class="card ${look.outfit===o.id?'on':''}" data-outfit="${o.id}"><img src="img/stand-${o.id}.webp" loading="lazy" alt="">${o.name}</button>`).join('')}</div><p class="note">Pronto: más outfits y “Diseñar con IA”.</p>`:''}
+   ${tab==='ropa'? `<div class="grid">${OUTFITS.filter(o=>READY.includes(o.id)).map(o=>`<button class="card ${look.outfit===o.id?'on':''}" data-outfit="${o.id}"><img src="img2/stand-${o.id}.webp" loading="lazy" alt="">${o.name}</button>`).join('')}</div><p class="note">${READY.length<OUTFITS.length?'Estoy estrenando cuarto: los otros outfits llegan en cuanto estén listos sus videos.':'Pronto: más outfits y “Diseñar con IA”.'}</p>`:''}
    ${tab==='pelo'? sw(HAIR,'hair'):''}${tab==='ojos'? sw(EYES,'eye'):''}${tab==='aretes'? sw(EARS,'ear'):''}`;
   const sw=(arr,key)=>`<div class="sw">${arr.map((c,i)=>`<button style="background:${c[2]}" class="${look[key]===i?'on':''}" data-k="${key}" data-i="${i}">${c[0]}</button>`).join('')}</div><p class="note">El color se aplica sobre su dibujo; en orillas finas puede verse algún detalle.</p>`;
   sheet('Clóset de '+cfg.name, html(), el=>{
     el.onclick=async e=>{ const b=e.target.closest('button'); if(!b) return;
       if(b.dataset.tab){ tab=b.dataset.tab; el.innerHTML=html(); return; }
       if(b.dataset.outfit){ const id=b.dataset.outfit; if(id===look.outfit) return; b.style.opacity=.5;
-        await loadOutfit(id, her.mode==='desk'); her.squash=0.05; await sleep(140); look.outfit=id; saveLook(); her.hop=0.7; el.innerHTML=html();
-        say(pick(['¿Cómo me veo? 😏','¡Ay, me encanta! ✨','Uff, qué chula 💅']),2000); loadOutfit(id,true).catch(()=>{}); return; }
+        await loadOutfit(id, true); her.squash=0.05; await sleep(140); look.outfit=id; saveLook(); her.hop=0.7; el.innerHTML=html();
+        say(pick(['¿Cómo me veo? 😏','¡Ay, me encanta! ✨','Uff, qué chula 💅']),2000); loadOutfit(id,true).catch(()=>{}); preloadClips(id); return; }
       if(b.dataset.k){ look[b.dataset.k]=+b.dataset.i; saveLook(); el.innerHTML=html(); her.hop=0.4; }
     };
   });
@@ -393,6 +397,9 @@ async function openSettings(){
 }
 
 $('#cname').textContent=cfg.name;
+const CAPTURE=/capture=1/.test(location.search);
+if(CAPTURE){ document.body.classList.add('capture'); }
 boot();
 // para pruebas
-window.__bff={talk:t=>{ say(t,5000); fakeTalkUntil=T+4; },her,P,send,goSpot,goDesk,leaveDesk,openCloset,look,setVoice,say,cam:()=>cam,setOutfit:async id=>{ await loadOutfit(id,true); look.outfit=id; saveLook(); }, T:()=>T, layout};
+function snap(spot){ her.spot=spot; her.mode=spot==='bed'?'sit':spot==='desk'?'desk':'stand'; her.phone=her.phoneT=0; fadeFrom=null; fadeT=1; camX=spotX(spot); }
+window.__bff={holdBlink:()=>{ nextBlink=-1; blinkT=0.075; },clipState:()=>clip&&{a:clip.a,b:clip.b,t:clip.v.currentTime,done:!!clip.done,alpha:clip.alpha,ready:clip.ready},snap,talk:t=>{ say(t,5000); fakeTalkUntil=T+4; },her,P,send,goSpot,goDesk,leaveDesk,openCloset,look,setVoice,say,cam:()=>cam,setOutfit:async id=>{ await loadOutfit(id,true); look.outfit=id; saveLook(); }, T:()=>T, layout};

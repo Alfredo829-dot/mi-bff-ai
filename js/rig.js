@@ -39,9 +39,12 @@ void main(){
  rgb*=uTint;
  float a=c.a*uAlpha; gl_FragColor=vec4(rgb*a,a);
 }`;
-const FS_BG = `precision mediump float; varying vec2 vUV; uniform sampler2D uTex; uniform float uDim; uniform vec4 uGlow;
+const FS_BG = `precision mediump float; varying vec2 vUV; uniform sampler2D uTex; uniform float uDim; uniform vec4 uGlow; uniform float uA;
 void main(){ vec3 c=texture2D(uTex,vUV).rgb*uDim;
- vec2 g=(vUV-uGlow.xy)/uGlow.zw; float d=dot(g,g); c+=vec3(0.45,0.3,0.9)*0.18*max(0.,1.-d)*step(0.001,uGlow.z); gl_FragColor=vec4(c,1.); }`;
+ vec2 g=(vUV-uGlow.xy)/uGlow.zw; float d=dot(g,g); c+=vec3(0.45,0.3,0.9)*0.18*max(0.,1.-d)*step(0.001,uGlow.z); gl_FragColor=vec4(c*uA,uA); }`;
+const FS_VID = `precision mediump float; varying vec2 vUV; uniform sampler2D uTex; uniform float uA;
+void main(){ vec3 c=texture2D(uTex,vec2(vUV.x,vUV.y*0.5)).rgb; float a=texture2D(uTex,vec2(vUV.x,0.5+vUV.y*0.5)).r;
+ a=clamp((a-0.04)/0.92,0.,1.)*uA; gl_FragColor=vec4(c*a,a); }`;
 const FS_SH = `precision mediump float; varying vec2 vUV; uniform float uAlpha;
 void main(){ vec2 p=vUV*2.-1.; float d=dot(p,p); float a=(1.-smoothstep(0.2,1.,d))*0.38*uAlpha; gl_FragColor=vec4(0.,0.,0.,a); }`;
 
@@ -59,7 +62,7 @@ export class Renderer {
     this.c=canvas; const o={alpha:false,antialias:false,premultipliedAlpha:true,preserveDrawingBuffer:true};
     this.gl2=true; let gl=canvas.getContext('webgl2',o); if(!gl){ gl=canvas.getContext('webgl',o); this.gl2=false; }
     if(!gl) throw new Error('WebGL no disponible'); this.gl=gl;
-    this.pPup=prog(gl,FS_PUP); this.pBg=prog(gl,FS_BG); this.pSh=prog(gl,FS_SH);
+    this.pPup=prog(gl,FS_PUP); this.pBg=prog(gl,FS_BG); this.pSh=prog(gl,FS_SH); this.pVid=prog(gl,FS_VID);
     this.buf=gl.createBuffer(); this.ibuf=gl.createBuffer(); this.qbuf=gl.createBuffer();
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
@@ -81,8 +84,16 @@ export class Renderer {
     gl.enableVertexAttribArray(0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(0,2,gl.FLOAT,false,16,0); gl.vertexAttribPointer(1,2,gl.FLOAT,false,16,8);
     gl.drawArrays(gl.TRIANGLE_STRIP,0,4); }
   clear(){ const gl=this.gl; gl.clearColor(0.06,0.03,0.09,1); gl.clear(gl.COLOR_BUFFER_BIT); }
-  drawBg(tex,W,H,cam,dim=1,glow=null){ const gl=this.gl,P=this.pBg; gl.useProgram(P.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
-    gl.uniform1i(P.u.uTex,0); gl.uniform1f(P.u.uDim,dim); gl.uniform4fv(P.u.uGlow, glow||[0,0,0,0]); this.quad(0,0,W,H,cam); }
+  drawBg(tex,W,H,cam,dim=1,glow=null,rect=null,alpha=1){ const gl=this.gl,P=this.pBg; gl.useProgram(P.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.uniform1i(P.u.uTex,0); gl.uniform1f(P.u.uDim,dim); gl.uniform4fv(P.u.uGlow, glow||[0,0,0,0]); gl.uniform1f(P.u.uA,alpha);
+    if(rect) this.quad(rect[0],rect[1],rect[2],rect[3],cam); else this.quad(0,0,W,H,cam); }
+  videoTexture(){ const gl=this.gl,t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); return t; }
+  updateVideo(t,video){ const gl=this.gl; gl.bindTexture(gl.TEXTURE_2D,t); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
+    try{ gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,video); return true; }catch(e){ return false; } }
+  drawVideo(tex,rect,cam,alpha){ const gl=this.gl,P=this.pVid; gl.useProgram(P.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.uniform1i(P.u.uTex,0); gl.uniform1f(P.u.uA,alpha); this.quad(rect[0],rect[1],rect[2],rect[3],cam); }
   drawShadow(x,y,w,h,cam,a){ const gl=this.gl,P=this.pSh; gl.useProgram(P.p); gl.uniform1f(P.u.uAlpha,a); this.quad(x-w/2,y-h/2,x+w/2,y+h/2,cam); }
 }
 
@@ -105,7 +116,7 @@ export class Puppet {
     this.vbuf=R.gl.createBuffer();
     // tono de piel para párpados
     this.skin=[0.96,0.80,0.72];
-    if(L.cheek){ const c2=document.createElement('canvas'); c2.width=c2.height=1; const x2=c2.getContext('2d'); x2.drawImage(img,L.cheek[0]-2,L.cheek[1]-2,5,5,0,0,1,1); const p=x2.getImageData(0,0,1,1).data; this.skin=[p[0]/255,p[1]/255,p[2]/255]; }
+    if(L.skin) this.skin=L.skin; else if(L.cheek){ const c2=document.createElement('canvas'); c2.width=c2.height=1; const x2=c2.getContext('2d'); x2.drawImage(img,L.cheek[0]-2,L.cheek[1]-2,5,5,0,0,1,1); const p=x2.getImageData(0,0,1,1).data; this.skin=[p[0]/255,p[1]/255,p[2]/255]; }
   }
   // deformación de un punto (u,v en px)
   deform(u,v,hw,P,t){
