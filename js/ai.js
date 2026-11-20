@@ -55,7 +55,7 @@ export function guard(text, adult=false){
   const young = minorSignal(text, adult);
   const sexy=SEXY.test(text)||(adult&&SEXY_ADULT.test(text));
   const rp=/\b(rol|roleplay|finge|fingir|imagina|personaje|hazte|disfr[aá]z\w*|vestida de|eres (una|mi))\b/i.test(text);
-  if((young && (sexy||adult)) || (YOUNG.test(text) && (sexy || (adult && rp))))
+  if((young && (sexy||adult)) || (YOUNG.test(text) && (sexy || rp)))
     return pick(['Nel, wey. Con morritos ni de broma, eso ni se pregunta. Cámbiale de tema 🙄','No mames, eso no. Con menores NADA. Siguiente tema.','Uy no, ahí sí me apago. Nada con menores, ni en fantasía. ¿De qué más hablamos?']);
   if(adult && NONCON.test(text)) return pick(['Nel, sin ganas de los dos no hay nada 😒 Así no juego.','Eso no, wey. Todo con ganas y de acuerdo, o nada. ¿Otra idea?']);
   if(adult && sexy && INCEST.test(text)) return pick(['Ay no, familia no 😖 Bórrale.','Nel, nada de familia en eso, qué asco jaja. Otra cosa.']);
@@ -169,7 +169,7 @@ async function viaProvider(prov, messages, opts){
   const key=provKey(prov); let list=modelList(prov,opts.adult), last, refused=0;
   for(let pass=0;pass<2;pass++){
     for(const m of list){
-      try{ const t=clean(await call(prov,key,m,messages,opts)); if(opts.adult&&isRefusal(t)){ refused++; last=Object.assign(new ProvErr(prov,200,'se negó'),{refusal:true}); continue; } return {text:t, via:prov, model:m}; }
+      try{ const t=clean(await call(prov,key,m,messages,opts)); if(isRefusal(t)){ refused++; last=Object.assign(new ProvErr(prov,200,'se negó'),{refusal:true}); continue; } return {text:t, via:prov, model:m}; }
       catch(e){ last=e; if(e.refusal){ refused++; continue; } if([401,402,403,429,0].includes(e.status)) throw e; } }
     if(pass===0 && !refused){ try{ list=(await listModels(prov,key)).filter(m=>!list.includes(m)).slice(0,3); }catch(e){ break; } if(!list.length) break; } else break;
   } throw last||new ProvErr(prov,404,'sin modelos');
@@ -194,7 +194,7 @@ export async function complete(messages, opts={}){
     try{ const r=await viaProvider(prov,messages,opts); r.errs=errs; return r; }
     catch(e){ if(e.refusal) refusals++; else errs.push(e); console.warn(prov,e.status,e.message); }
   }
-  try{ const t=clean(await polli(messages,opts)); if(opts.adult&&isRefusal(t)) refusals++; else return {text:t, via:'respaldo', errs}; }
+  try{ const t=clean(await polli(messages,opts)); if(isRefusal(t)) refusals++; else return {text:t, via:'respaldo', errs}; }
   catch(e){ if(e instanceof Wait){ e.errs=errs; if(!refusals) throw e; } else if(!refusals){ e.errs=errs; throw e; } }
   return {text:'', refused:true, via:'respaldo', errs};
 }
