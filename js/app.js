@@ -1,8 +1,8 @@
 import { Renderer, Puppet, loadImage } from './rig.js';
-import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, groqErrText, groqModels } from './ai.js';
+import { LS, BASE_PERSONA, profileText, guard, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.1.0';
+const VERSION='1.2.0';
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -191,7 +191,7 @@ function bubbleEl(m){
   const d=document.createElement('div'); d.className='m '+(m.role==='user'?'me':m.role==='sys'?'sys':'her');
   d.innerHTML=esc(m.content).replace(/(https?:\/\/[^\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
   if(m.links&&m.links.length){ const s=document.createElement('div'); s.className='src'; for(const l of m.links){ const a=document.createElement('a'); a.href=l.url; a.target='_blank'; a.rel='noopener'; a.textContent='🔗 '+l.title; s.appendChild(a);} d.appendChild(s); }
-  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=(m.role==='assistant'&&m.via?`<span class="via ${m.via}">${m.via==='groq'?'⚡ Groq':'respaldo'}</span> `:'')+hhmm(m.ts)+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
+  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=(m.role==='assistant'&&m.via?`<span class="via ${m.via==='respaldo'?'respaldo':'key'}">${PROVIDERS[m.via]?'⚡ '+PROVIDERS[m.via].name:'respaldo'}</span> `:'')+hhmm(m.ts)+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
   m._el=d; return d;
 }
 function render(){ const box=$('#msgs'); box.innerHTML=''; for(const m of hist.slice(-60)) box.appendChild(bubbleEl(m)); box.scrollTop=box.scrollHeight; }
@@ -207,7 +207,7 @@ function systemPrompt(extra=''){
   const now=new Date(); const where={idle:'parada en tu cuarto',bed:'echada en tu cama',closet:'frente a tu clóset',desk:'en tu compu'}[her.spot]||'en tu cuarto';
   const ctx=`\nAhora: ${now.toLocaleString('es-MX',{weekday:'long',hour:'2-digit',minute:'2-digit'})}. Estás ${where}, vestida con tu outfit "${OUTFITS.find(o=>o.id===look.outfit).name}".`+
     (voiceMode? ' Están platicando EN PERSONA, frente a frente: habla natural para decirse en voz alta, sin emojis ni links.' : ' Están platicando por WhatsApp desde tu cel: escribe como mensaje de WhatsApp.');
-  return persona+ctx+profileText(LS.get('bff_profile',{}))+extra;
+  return persona+(cfg.adult?ADULT_RULES(cfg.name):'')+ctx+profileText(LS.get('bff_profile',{}))+extra;
 }
 function chatMsgs(extra){ const h=hist.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>({role:m.role,content:m.content}));
   return [{role:'system',content:systemPrompt(extra)},...h]; }
@@ -239,12 +239,13 @@ async function send(text){
   if(userCount%5===0 && hasGroq()){ const um2=hist.filter(m=>m.role==='user').slice(-12).map(m=>m.content); updateProfile(um2); }
 }
 const lastUser=()=>{ const u=[]; for(let i=hist.length-1;i>=0&&hist[i].role!=='assistant';i--) if(hist[i].role==='user') u.unshift(hist[i].content); return u.join('\n'); };
-let groqWarned='';
-function warnGroq(e){ if(!e){ groqWarned=''; return; } const k=String(e.status); if(groqWarned===k) return; groqWarned=k; push({role:'sys',content:'⚠️ '+groqErrText(e)}); }
+const warned=new Set();
+function warnErrs(errs){ for(const e of errs||[]){ const k=e.prov+':'+e.status; if(warned.has(k)) continue; warned.add(k); push({role:'sys',content:'⚠️ '+provErrText(e)}); } }
+const DEFLECT=['Jajaja uy, me pusiste roja 🙈 Ahorita se me trabó la cabeza, cuéntame tú qué traes en mente…','Ay, cállate 😏 me sacaste los colores. A ver, sígueme contando, ¿qué más?','Mmm qué atrevido 😏 dame chance, que se me fue la onda; ¿en qué íbamos?'];
 async function askAI(msgs){
   for(let i=0;i<4;i++){
-    try{ const r=await complete(msgs); warnGroq(r.groqErr); return r; }
-    catch(e){ warnGroq(e.groqErr); if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis de Groq (⚙) contesto al instante.'}`}); }
+    try{ const r=await complete(msgs,{adult:!!cfg.adult}); warnErrs(r.errs); if(r.refused) return {text:pick(DEFLECT),via:r.via}; return r; }
+    catch(e){ warnErrs(e.errs); if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis (⚙) contesto al instante.'}`}); }
         await sleep((Math.min(60,e.wait||45)+1)*1000); continue; }
       break; }
   }
@@ -252,7 +253,7 @@ async function askAI(msgs){
 }
 async function respond(){
   const text=lastUser(); if(!text) return;
-  const g=guard(text);
+  const g=guard(text,!!cfg.adult);
   if(g){ await sleep(500); markRead(); setTyping(true); await sleep(900); setTyping(false); await reply({text:g}); return; }
   const q=researchQuery(text.split('\n').pop());
   if(q){ await research(q,text); return; }
@@ -363,14 +364,18 @@ async function openCloset(walk){
 
 $('#gear').addEventListener('click',openSettings);
 async function openSettings(){
-  const key=LS.get('bff_groq',''); const ready=await V.piperReady();
+  const ready=await V.piperReady();
   sheet('Ajustes',`
    <div class="row"><label>Nombre de tu BFF</label><input type="text" id="sName" maxlength="20" value="${esc(cfg.name)}"></div>
    <div class="row"><label>Voz</label><select id="sVoice">${V.VOICES.map(v=>`<option value="${v.id}" ${cfg.voice===v.id?'selected':''}>${v.name}</option>`).join('')}<option value="none" ${cfg.voice==='none'?'selected':''}>Sin voz</option></select>
      <p class="note" id="vNote">${ready?'✅ Voz natural ya descargada (funciona sin internet).':'La voz natural se descarga una vez (~63 MB) y luego funciona sin internet.'}</p>
      ${ready?'':'<button class="btn" id="sDl">⬇️ Descargar voz natural</button><div class="prog"><i id="sProg"></i></div>'}</div>
    <div class="row sw-row"><label style="margin:0">Leer en voz alta también en modo texto</label><input type="checkbox" id="sRead" ${cfg.readAloud?'checked':''}></div>
-   <div class="row"><label>Llave de Groq (opcional, respuestas más rápidas y listas)</label><input type="password" id="sKey" placeholder="gsk_…" autocomplete="off" autocapitalize="off" spellcheck="false" value="${key?'••••••••':''}"><p class="note" id="kStat">${key?'Llave guardada. Probando…':''}</p><p class="note">Sin llave usa un servicio gratis sin registro. Saca una gratis en console.groq.com. Se guarda solo en este cel.</p></div>
+   <div class="row sw-row"><label style="margin:0">🔞 Modo +18 (solo texto)</label><input type="checkbox" id="sAdult" ${cfg.adult?'checked':''}></div>
+   <p class="note" style="margin-top:-6px">Plática coqueta/subida de tono entre adultos, solo texto. Su ropa, poses y animaciones no cambian. Apagado por defecto.</p>
+   <div class="row"><label>Llaves de IA (opcionales, gratis, se guardan solo en este cel)</label>
+   ${Object.entries(PROVIDERS).map(([id,P])=>`<div class="kb"><span class="kn">${P.name}</span><input type="password" data-prov="${id}" placeholder="${P.hint}" autocomplete="off" autocapitalize="off" spellcheck="false" value="${provKey(id)?'••••••••':''}"><p class="note" id="kst-${id}">${provKey(id)?'Probando…':''}</p></div>`).join('')}
+   <p class="note">Sin llaves uso un servicio gratis sin registro (más lento y se niega más en +18). Saca llaves en console.groq.com, aistudio.google.com, console.mistral.ai o cloud.cerebras.ai.</p></div>
    <div class="row"><button class="btn red" id="sReset">🔄 Reiniciar amistad</button><p class="note">Borra la plática y lo que ${esc(cfg.name)} sabe de ti. Todo se guarda solo en este dispositivo.</p></div>
    <div class="row sw-row"><label style="margin:0">Modo desarrollador</label><input type="checkbox" id="sDev" ${cfg.dev?'checked':''}></div>
    <div class="row" id="devBox" style="display:${cfg.dev?'block':'none'}"><label>Personalidad (solo dev)</label><textarea id="sPersona" placeholder="Vacío = personalidad normal">${esc(cfg.persona||'')}</textarea></div>
@@ -378,16 +383,18 @@ async function openSettings(){
     el.querySelector('#sName').onchange=e=>{ cfg.name=e.target.value.trim()||'Vale'; saveCfg(); $('#cname').textContent=cfg.name; };
     el.querySelector('#sVoice').onchange=e=>{ cfg.voice=e.target.value; saveCfg(); };
     el.querySelector('#sRead').onchange=e=>{ cfg.readAloud=e.target.checked; saveCfg(); V.unlockAudio(); };
-    const kIn=el.querySelector('#sKey'), kSt=el.querySelector('#kStat'); let kT=0, kN=0;
-    const testKey=async()=>{ const k=cleanKey(LS.get('bff_groq','')); const n=++kN; if(!k){ kSt.textContent='Sin llave: uso el respaldo gratis.'; return; }
-      kSt.textContent='Probando llave…'; try{ const ms=await groqModels(k); if(n!==kN) return; kSt.textContent=ms.length?`✅ Groq conectado (${ms[0]}). Ya contesto con Groq.`:'⚠️ La llave sirve pero Groq no ofrece modelos de chat.'; }
-      catch(e){ if(n!==kN) return; kSt.textContent='❌ '+groqErrText(e); } };
-    const saveKey=()=>{ const raw=kIn.value; if(raw.startsWith('••')) return; const v=cleanKey(raw); if(v) LS.set('bff_groq',v); else LS.del('bff_groq'); LS.del('bff_groq_models'); groqWarned=''; testKey(); };
-    kIn.onfocus=()=>{ if(kIn.value.startsWith('••')) kIn.value=''; };
-    kIn.oninput=()=>{ clearTimeout(kT); kT=setTimeout(saveKey,350); };
-    kIn.onchange=()=>{ clearTimeout(kT); saveKey(); };
-    kIn.onblur=()=>{ if(!kIn.value&&hasGroq()) kIn.value='••••••••'; };
-    if(key) testKey();
+    for(const kIn of el.querySelectorAll('input[data-prov]')){ const prov=kIn.dataset.prov, P=PROVIDERS[prov], kSt=el.querySelector('#kst-'+prov); let kT=0, kN=0;
+      const testKey=async()=>{ const k=provKey(prov); const n=++kN; if(!k){ kSt.textContent=''; return; }
+        kSt.textContent='Probando llave…'; try{ const ms=await listModels(prov,k); if(n!==kN) return; kSt.textContent=ms.length?`✅ ${P.name} conectado (${ms[0]}).`:`⚠️ La llave sirve pero ${P.name} no ofrece modelos de chat.`; }
+        catch(e){ if(n!==kN) return; kSt.textContent='❌ '+provErrText(e); } };
+      const saveKey=()=>{ const raw=kIn.value; if(raw.startsWith('••')) return; const v=cleanKey(raw); if(v) LS.set(P.ls,v); else LS.del(P.ls); LS.del('bff_models_'+prov); for(const w of [...warned]) if(w.startsWith(prov+':')) warned.delete(w); testKey(); };
+      kIn.onfocus=()=>{ if(kIn.value.startsWith('••')) kIn.value=''; };
+      kIn.oninput=()=>{ clearTimeout(kT); kT=setTimeout(saveKey,350); };
+      kIn.onchange=()=>{ clearTimeout(kT); saveKey(); };
+      kIn.onblur=()=>{ if(!kIn.value&&provKey(prov)) kIn.value='••••••••'; };
+      if(provKey(prov)) testKey(); }
+    el.querySelector('#sAdult').onchange=e=>{ if(e.target.checked){ if(!confirm('🔞 Modo +18 (solo texto)\n\nConfirmo que tengo 18 años o más y quiero pláticas para adultos. Nada con menores, todo con consentimiento.\n\n¿Tengo 18 años o más?')){ e.target.checked=false; return; } cfg.adult=true; cfg.adultAt=Date.now(); }
+      else cfg.adult=false; saveCfg(); };
     el.querySelector('#sDev').onchange=e=>{ cfg.dev=e.target.checked; saveCfg(); el.querySelector('#devBox').style.display=cfg.dev?'block':'none'; };
     el.querySelector('#sPersona').onchange=e=>{ cfg.persona=e.target.value; saveCfg(); };
     const dl=el.querySelector('#sDl'); if(dl) dl.onclick=()=>{ dl.disabled=true; dl.textContent='Descargando…'; downloadVoice(p=>{ const i=el.querySelector('#sProg'); if(i) i.style.width=Math.round(p*100)+'%'; }).then(()=>{ dl.textContent='✅ Lista'; }); };
