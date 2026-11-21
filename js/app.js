@@ -1,8 +1,8 @@
 import { Renderer, Puppet, loadImage } from './rig.js';
-import { LS, BASE_PERSONA, profileText, guard, minorSignal, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
+import { LS, BASE_PERSONA, profileText, guard, minorSignal, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES, warmModels } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.4.6'; // única versión: también nombra la caché del service worker
+const VERSION='1.4.7'; // única versión: también nombra la caché del service worker
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -35,6 +35,7 @@ let bgTex, pup={}, meta={};
 const her={spot:'idle',mode:'stand',phone:0,phoneT:0,phoneHold:0,squash:1,hop:0,typingDesk:false};
 const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,typing:0,open:0};
 const G={tilt:0,nod:0,armL:0,armR:0,turn:0}; let gestT=0;
+let forceOpen=null, lipHold=0; // forceOpen: solo pruebas (__bff.open)
 let talking=false, fakeTalkUntil=0, herTyping=false, userTyping=0, voiceMode=false, busy=false, lastPoke=0;
 let cam={k:1,cx:646,cy:416,ax:0,ay:0,aw:1,ah:1}, camX=SPOTS.idle.cx, camY=416, fadeFrom=null, fadeT=1;
 
@@ -50,6 +51,8 @@ async function loadOutfit(id, all=false){
 async function boot(){
   try{
     R=new Renderer($('#gl'));
+    $('#gl').addEventListener('webglcontextlost',e=>{ e.preventDefault(); },false);
+    $('#gl').addEventListener('webglcontextrestored',()=>location.reload(),false);
     prog(0.1); const bg=await loadImage('img2/cuarto.webp'); bgTex=R.texture(bg,true); prog(0.45);
     await loadOutfit(look.outfit); prog(1);
   }catch(e){ $('#loader .lname').textContent=/WebGL/i.test(e.message||'')?'Tu navegador no soporta WebGL 😢 prueba en Chrome':'No pude cargar 😢 recarga'; console.error(e); return; }
@@ -57,6 +60,7 @@ async function boot(){
   setTimeout(()=>{ $('#loader').classList.add('out'); if(!CAPTURE) intro(); },150);
   loadOutfit(look.outfit,true).catch(()=>{});
   if(!CAPTURE) setTimeout(()=>preloadClips(),2500);
+  if(!CAPTURE) setTimeout(()=>warmModels(),1200);
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v='+VERSION).catch(()=>{});
 }
 
@@ -111,6 +115,10 @@ let gustT=3, gust=0;
 let last=performance.now(), T=0, nextBlink=/capture=1/.test(location.search)?1e9:1.5, blinkT=-1, dbl=false;
 const lerp=(a,b,t)=>a+(b-a)*t;
 function frame(now){
+  try{ frameBody(now); }catch(e){ if(!frame.err){ frame.err=1; console.error('frame',e); } }
+  requestAnimationFrame(frame);
+}
+function frameBody(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now; T+=dt;
   if(T>nextBlink&&blinkT<0){ blinkT=0; }
   if(blinkT>=0){ blinkT+=dt; const d=0.16; P.blink=blinkT<d/2? blinkT/(d/2) : Math.max(0,1-(blinkT-d/2)/(d/2)); if(blinkT>d){ blinkT=-1; P.blink=0; if(!dbl&&Math.random()<0.2){ dbl=true; nextBlink=T+0.12; } else { dbl=false; nextBlink=T+2+Math.random()*3.5; } } }
@@ -128,7 +136,11 @@ function frame(now){
   P.headTilt=lerp(P.headTilt,tiltT,dt*3); P.nod=lerp(P.nod,(isTalk?G.nod*Math.max(0,Math.sin(T*7)):0)+ph*0.4,dt*6); P.headTurn=lerp(P.headTurn,G.turn*0.6+lookX*0.35*lookOn,dt*2.5);
   P.armL=lerp(P.armL,G.armL+Math.sin(T*0.9)*0.01,dt*3); P.armR=lerp(P.armR,G.armR-Math.sin(T*0.8)*0.01,dt*3);
   let open=0; if(talking) open=V.audioLevel(); else if(T<fakeTalkUntil) open=Math.max(0,Math.sin(T*15)*0.5+Math.sin(T*23)*0.3+0.15);
-  P.open=lerp(P.open,Math.min(1,open),dt*18);
+  // boca: ataque rápido / suelta más lenta + retención corta para que no parpadee (idea de ryza-ai-revive, MIT)
+  open=Math.min(1,open);
+  if(forceOpen!=null) P.open=forceOpen;
+  else if(open>=P.open){ P.open+=(open-P.open)*(1-Math.exp(-dt/0.025)); lipHold=0.06; }
+  else if(lipHold>0) lipHold-=dt; else P.open+=(open-P.open)*(1-Math.exp(-dt/0.07));
   const hasPhone=!!SPOTS[her.spot]?.phone;
   her.phoneT = hasPhone && !voiceMode && !moving_now && ((herTyping||userTyping>T||busy) || her.phoneHold>T) ? 1 : 0;
   her.phone=lerp(her.phone,her.phoneT,dt*5); if(Math.abs(her.phone-her.phoneT)<0.01) her.phone=her.phoneT;
@@ -139,7 +151,6 @@ function frame(now){
   draw();
   fxDraw(dt);
   placeBubble();
-  requestAnimationFrame(frame);
 }
 function lookUniforms(){ return { hair:HAIR[look.hair][1], eye:EYES[look.eye][1], ear:EARS[look.ear][1], tint:[1,1,1] }; }
 function drawSpot(spot,alpha,lu){
@@ -176,27 +187,30 @@ async function fetchClip(k){ if(!CLIP_RECTS[k]) return null; if(clipURL[k]) retu
   return clipURL[k]; }
 function preloadClips(o=look.outfit){ const ks=[]; for(const s of ['desk','bed','closet']) ks.push(clipKey('idle',s,o),clipKey(s,'idle',o));
   ks.reduce((p,k)=>p.then(()=>fetchClip(k)),Promise.resolve()); }
-async function playClip(a,b){
-  const k=clipKey(a,b); const url=await Promise.race([fetchClip(k), sleep(7000).then(()=>null)]); if(!url) return false;
+async function playClip(a,b,rate=1){
+  const k=clipKey(a,b); const url=await Promise.race([fetchClip(k), sleep(clipURL[k]?4000:2500).then(()=>null)]); if(!url) return false; // si no ha bajado, transición suave ya (sigue bajando para la próxima)
   const v=document.createElement('video'); v.muted=true; v.playsInline=true; v.setAttribute('playsinline',''); v.setAttribute('muted',''); v.preload='auto'; v.src=url;
-  try{ await new Promise((res,rej)=>{ v.oncanplay=res; v.onerror=rej; setTimeout(rej,7000); }); await v.play(); }catch(e){ return false; }
+  const drop=()=>{ try{ v.pause(); v.removeAttribute('src'); v.load(); }catch{} }; // suelta el decodificador (en cel hay pocos)
+  try{ await new Promise((res,rej)=>{ v.oncanplay=res; v.onerror=rej; setTimeout(rej,3500); }); v.playbackRate=rate; await v.play(); }catch(e){ drop(); return false; }
   const tex=clip?.tex||R.videoTexture();
   clip={v,tex,alpha:0,a,b,rect:CLIP_RECTS[k],ending:false,ready:false};
   her.phone=her.phoneT=0;
-  await new Promise(res=>{ v.onended=res; setTimeout(res,(v.duration||6)*1000+1500); });
+  await new Promise(res=>{ v.onended=res; setTimeout(res,(v.duration||6)/rate*1000+1500); });
   her.spot=b; her.mode=b==='desk'?'desk':b==='bed'?'sit':'stand'; fadeFrom=null; fadeT=1;
-  clip.ending=true; await sleep(260); clip.v.pause(); clip.alpha=0; clip.done=true; return true;
+  clip.ending=true; await sleep(260); clip.alpha=0; clip.done=true; drop(); return true;
 }
 function crossTo(b){ fadeFrom=her.spot; fadeT=0; her.spot=b; her.mode=b==='desk'?'desk':b==='bed'?'sit':'stand'; return sleep(450); }
 function stateSpot(){ return her.spot; }
-function goSpot(name){ moving=moving.then(()=>_goSpot(name)).catch(()=>{}); return moving; }
+let goTarget=null; // varios toques seguidos: solo se va al último destino
+function goSpot(name){ goTarget=name; moving=moving.then(()=>{ if(goTarget!==name) return; return _goSpot(name); }).catch(()=>{}); return moving; }
 async function _goSpot(name){
   const from=her.spot; if(from===name) return;
   moving_now=true; her.typingDesk=false;
   try{
     await loadOutfit(look.outfit,true).catch(()=>{});
     const legs=(from!=='idle'&&name!=='idle')? [[from,'idle'],['idle',name]] : [[from,name]];
-    for(const [a,b] of legs){ if(!(await playClip(a,b))) await crossTo(b); }
+    const rate=legs.length>1?1.45:1.15; // dos tramos (cama→compu): más ágil
+    for(const [a,b] of legs){ if(!(await playClip(a,b,rate))) await crossTo(b); }
     const S=SPOTS[her.spot]; const [bx,by]=toScreen(S.cx,S.foot); fxBurst(bx,by,10);
   } finally { moving_now=false; }
 }
@@ -209,7 +223,11 @@ function say(text,ms){ const b=$('#bubble'); b.textContent=text; b.classList.rem
 function placeBubble(){
   const b=$('#bubble'); if(performance.now()>bubbleUntil){ b.classList.add('hide'); return; }
   const S=SPOTS[her.spot]||SPOTS.idle; let X=S.cx, Y=S.top-14;
-  let [sx,sy]=toScreen(X,Y); if(sy<78){ const [rx]=toScreen(S.cx+150,0); sx=rx; sy=78; } b.style.left=Math.max(cam.ax+90,Math.min(cam.ax+cam.aw-90,sx))+'px'; b.style.top=Math.max(70,sy)+'px';
+  let [sx,sy]=toScreen(X,Y); const bw=b.offsetWidth||200, bh=b.offsetHeight||40;
+  // sin espacio arriba de la cabeza (horizontal / modo voz): la burbuja va AL LADO de la cara, no encima
+  const side= sy-bh<8; b.classList.toggle('side',side);
+  if(side){ const [hx,hy]=toScreen(S.cx,S.top+70); const r=hx+50+bw/2, l=hx-50-bw/2; sx= r+bw/2<cam.ax+cam.aw-8? r : l; sy=Math.max(bh+8,hy+bh/2); }
+  b.style.left=Math.max(cam.ax+bw/2+6,Math.min(cam.ax+cam.aw-bw/2-6,sx))+'px'; b.style.top=Math.max(bh+8,sy)+'px';
 }
 
 // ---------- chat UI ----------
@@ -219,11 +237,17 @@ function bubbleEl(m){
   const d=document.createElement('div'); d.className='m '+(m.role==='user'?'me':m.role==='sys'?'sys':'her');
   d.innerHTML=esc(m.content).replace(/(https?:\/\/[^\s)]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
   if(m.links&&m.links.length){ const s=document.createElement('div'); s.className='src'; for(const l of m.links){ const a=document.createElement('a'); a.href=l.url; a.target='_blank'; a.rel='noopener'; a.textContent='🔗 '+l.title; s.appendChild(a);} d.appendChild(s); }
-  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=(m.role==='assistant'&&m.via?`<span class="via ${m.via==='respaldo'?'respaldo':'key'}">${PROVIDERS[m.via]?'⚡ '+PROVIDERS[m.via].name:'respaldo'}</span> `:'')+hhmm(m.ts)+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
+  if(m.role!=='sys'){ const meta=document.createElement('span'); meta.className='meta'; meta.innerHTML=(m.role==='assistant'&&m.via?`<span class="via ${m.via==='respaldo'?'respaldo':'key'}">${PROVIDERS[m.via]?'⚡ '+PROVIDERS[m.via].name:'respaldo'}</span> `:'')+hhmm(m.ts)+(m.role==='assistant'?'<button class="regen" aria-label="Otra respuesta" title="Otra respuesta">↻</button>':'')+(m.role==='user'?`<span class="tick ${m.read?'read':''}">✓✓</span>`:''); d.appendChild(meta); }
   m._el=d; return d;
 }
-function render(){ const box=$('#msgs'); box.innerHTML=''; for(const m of hist.slice(-60)) box.appendChild(bubbleEl(m)); box.scrollTop=box.scrollHeight; }
-function push(m){ m.ts=m.ts||Date.now(); hist.push(m); if(m.role!=='sys') saveHist(); const box=$('#msgs'); const t=box.querySelector('.typing'); const el=bubbleEl(m); el.classList.add('new'); box.insertBefore(el,t); requestAnimationFrame(()=>box.scrollTop=box.scrollHeight); return m; }
+function render(){ const box=$('#msgs'); box.innerHTML=''; for(const m of hist.slice(-60)) box.appendChild(bubbleEl(m)); box.scrollTop=box.scrollHeight; markLastHer(); }
+// ↻ otra respuesta (como el "swipe/regenerate" de SillyTavern): solo en el último mensaje de ella
+function markLastHer(){ const box=$('#msgs'); box.querySelectorAll('.m.her.last').forEach(e=>e.classList.remove('last'));
+  let i=hist.length-1; while(i>=0&&hist[i].role==='sys') i--; const m=hist[i]; if(m&&m.role==='assistant'&&m._el&&hist.slice(0,i).some(x=>x.role==='user')) m._el.classList.add('last'); }
+$('#msgs').addEventListener('click',async e=>{ const b=e.target.closest('.regen'); if(!b||busy||talking) return; const el=b.closest('.m.her'); if(!el||!el.classList.contains('last')) return;
+  const i=hist.findLastIndex(m=>m._el===el); if(i<0) return; hist.splice(i,1); saveHist(); el.remove(); V.stop();
+  busy=true; try{ await respond(); } finally{ busy=false; } });
+function push(m){ m.ts=m.ts||Date.now(); hist.push(m); if(m.role!=='sys') saveHist(); const box=$('#msgs'); const t=box.querySelector('.typing'); const el=bubbleEl(m); el.classList.add('new'); box.insertBefore(el,t); markLastHer(); requestAnimationFrame(()=>box.scrollTop=box.scrollHeight); return m; }
 function setTyping(on){ herTyping=on; const box=$('#msgs'); let t=box.querySelector('.typing'); $('#cstatus').textContent=on?'escribiendo…':'en línea';
   if(on&&!t){ t=document.createElement('div'); t.className='typing'; t.innerHTML='<i></i><i></i><i></i>'; box.appendChild(t); box.scrollTop=box.scrollHeight; }
   if(!on&&t) t.remove(); }
@@ -237,12 +261,14 @@ function systemPrompt(extra=''){
     (voiceMode? ' Están platicando EN PERSONA, frente a frente: habla natural para decirse en voz alta, sin emojis ni links.' : ' Están platicando por WhatsApp desde tu cel: escribe como mensaje de WhatsApp.');
   return persona+(cfg.adult?ADULT_RULES(cfg.name):'')+ctx+profileText(LS.get('bff_profile',{}))+extra;
 }
-function chatMsgs(extra){ const h=hist.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>({role:m.role,content:m.content}));
+function chatMsgs(extra){ const h=hist.filter(m=>m.role==='user'||m.role==='assistant').slice(-16).map(m=>({role:m.role,content:m.content.length>700? m.content.slice(0,700)+'…' : m.content})); // contexto corto = respuesta más rápida
   return [{role:'system',content:systemPrompt(extra)},...h]; }
 let userCount=LS.get('bff_ucount',0);
-async function reply(m){
-  // muestra respuesta, voz, gestos
-  const msg=push({role:'assistant',content:m.text,links:m.links,via:m.via});
+async function reply(m,live){
+  // muestra respuesta, voz, gestos (live = burbuja que ya se mostró en streaming: solo se completa)
+  let msg;
+  if(live){ msg=live; Object.assign(msg,{content:m.text,links:m.links,via:m.via}); const old=msg._el, el=bubbleEl(msg); if(old&&old.isConnected) old.replaceWith(el); saveHist(); markLastHer(); }
+  else msg=push({role:'assistant',content:m.text,links:m.links,via:m.via});
   her.hop=0.6; 
   if(voiceMode||cfg.readAloud) await speakLine(m.text); else { her.phoneHold=T+6; }
   return msg;
@@ -273,12 +299,12 @@ const lastUser=()=>{ const u=[]; for(let i=hist.length-1;i>=0&&hist[i].role!=='a
 const warned=new Set();
 function warnErrs(errs){ for(const e of errs||[]){ const k=e.prov+':'+e.status; if(warned.has(k)) continue; warned.add(k); push({role:'sys',content:'⚠️ '+provErrText(e)}); } }
 const DEFLECT=['Jajaja uy, me pusiste roja 🙈 Ahorita se me trabó la cabeza, cuéntame tú qué traes en mente…','Ay, cállate 😏 me sacaste los colores. A ver, sígueme contando, ¿qué más?','Mmm qué atrevido 😏 dame chance, que se me fue la onda; ¿en qué íbamos?'];
-async function askAI(msgs){
+async function askAI(msgs,onDelta){
   for(let i=0;i<4;i++){
-    try{ const r=await complete(msgs,{adult:!!cfg.adult}); warnErrs(r.errs); if(r.refused) return {text:pick(DEFLECT),via:r.via}; return r; }
+    try{ const r=await complete(msgs,{adult:!!cfg.adult,onDelta}); warnErrs(r.errs); if(r.refused) return {text:pick(DEFLECT),via:r.via}; return r; }
     catch(e){ warnErrs(e.errs); if(e.wait){ const w=Math.min(60,e.wait||45);
         push({role:'sys',content:limitWarned?`⏳ Espero ${w} s y lo reintento…`:`La IA gratis sin llave deja ~1 respuesta cada ${w} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis (⚙) contesto al instante.'}`}); limitWarned=true;
-        await sleep((w+1)*1000); continue; }
+        for(let k=w+1;k>0;k--){ $('#cstatus').textContent=`escribiendo… (${k}s)`; await sleep(1000); } $('#cstatus').textContent='escribiendo…'; continue; }
       break; }
   }
   return {text:pick(['Uy, se me trabó el cel 😩 ¿me lo repites?','Ay, se me fue el internet wey, dame chance y repítemelo 🙏'])};
@@ -292,9 +318,14 @@ async function respond(){
   if(g){ await sleep(500); markRead(); setTyping(true); await sleep(900); setTyping(false); await reply({text:g}); return; }
   const q=researchQuery(text.split('\n').pop());
   if(q){ await research(q,text); return; }
-  await sleep(350); markRead(); setTyping(true); const t0=performance.now();
-  const r=await askAI(chatMsgs());
-  const min=Math.min(2600,600+r.text.length*14); const left=min-(performance.now()-t0); if(left>0) await sleep(left);
+  await sleep(150); markRead(); setTyping(true); const t0=performance.now();
+  // streaming: la burbuja aparece con las primeras frases y se va llenando (idea de SillyTavern)
+  let live=null; const onDelta=t=>{ if(!live){ setTyping(false); live=push({role:'assistant',content:t}); her.hop=0.6; }
+    else { live.content=t; if(live._el&&live._el.firstChild) live._el.firstChild.textContent=t; const box=$('#msgs'); box.scrollTop=box.scrollHeight; } };
+  const r=await askAI(chatMsgs(),onDelta);
+  if(live){ await reply(r,live); return; }
+  // pausa mínima de "escribiendo" (antes hasta 2.6 s extra)
+  const min=Math.min(1100,300+r.text.length*5); const left=min-(performance.now()-t0); if(left>0) await sleep(left);
   setTyping(false); await reply(r);
 }
 const pick=a=>a[Math.floor(Math.random()*a.length)];
@@ -451,4 +482,4 @@ if(CAPTURE){ document.body.classList.add('capture'); }
 boot();
 // para pruebas
 function snap(spot){ her.spot=spot; her.mode=spot==='bed'?'sit':spot==='desk'?'desk':'stand'; her.phone=her.phoneT=0; fadeFrom=null; fadeT=1; camX=spotX(spot); }
-window.__bff={holdBlink:()=>{ nextBlink=-1; blinkT=0.075; },clipState:()=>clip&&{a:clip.a,b:clip.b,t:clip.v.currentTime,done:!!clip.done,alpha:clip.alpha,ready:clip.ready},snap,talk:t=>{ say(t,5000); fakeTalkUntil=T+4; },her,P,send,goSpot,goDesk,leaveDesk,openCloset,look,setVoice,say,cam:()=>cam,setOutfit:async id=>{ await loadOutfit(id,true); look.outfit=id; saveLook(); }, T:()=>T, layout};
+window.__bff={holdBlink:()=>{ nextBlink=-1; blinkT=0.075; },clipState:()=>clip&&{a:clip.a,b:clip.b,t:clip.v.currentTime,done:!!clip.done,alpha:clip.alpha,ready:clip.ready},snap,talk:t=>{ say(t,5000); fakeTalkUntil=T+4; },her,P,send,goSpot,goDesk,leaveDesk,openCloset,look,setVoice,say,cam:()=>cam,setOutfit:async id=>{ await loadOutfit(id,true); look.outfit=id; saveLook(); }, T:()=>T, layout, open:v=>{ forceOpen=v; }, toScreen:(x,y)=>toScreen(x,y)};

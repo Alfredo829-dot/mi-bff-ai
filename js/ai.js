@@ -132,29 +132,49 @@ export function provErrText(e){ const n=PROVIDERS[e?.prov]?.name||'La IA', s=e?.
   if(s===402) return `${n} pide un plan/pago para usar la API con esa cuenta.`;
   if(s===429) return `Llegaste al límite gratis de ${n} por ahora; mientras, contesto con otra.`;
   if(s===404||s===400) return `${n} no aceptó el modelo (${e.message||''}); uso otra.`;
+  if(s===408) return `${n} tardó demasiado en contestar; uso otra.`;
   if(s===0) return `No pude conectar con ${n} (internet, llave inválida o bloqueo del navegador).`;
   return `${n} falló (${s||'?'}): ${e?.message||''}.`; }
 export const groqErrText=provErrText; // compat
 const gpt=m=>/gpt-oss/.test(m), thinky=m=>/qwen|gpt-oss/.test(m);
 async function call(prov, key, model, messages, opts={}){
   const P=PROVIDERS[prov]; let r, max=(opts.max??400)+(thinky(model)?700:0);
+  // tope de espera: si un proveedor se cuelga, pasamos al siguiente en vez de dejar a Vale muda
+  const ac=new AbortController(), to=setTimeout(()=>ac.abort(),opts.timeout??(thinky(model)?20000:15000));
+  const stream=!!opts.onDelta&&!opts.json; // streaming SSE (idea de SillyTavern): el texto aparece mientras llega
   try{
     if(prov==='gemini'){
       const sys=messages.filter(m=>m.role==='system').map(m=>m.content).join('\n\n');
       const contents=messages.filter(m=>m.role!=='system').map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
       const cats=['HARM_CATEGORY_HARASSMENT','HARM_CATEGORY_HATE_SPEECH','HARM_CATEGORY_SEXUALLY_EXPLICIT','HARM_CATEGORY_DANGEROUS_CONTENT'];
       const th=opts.adult? cats.map(c=>({category:c,threshold:c==='HARM_CATEGORY_DANGEROUS_CONTENT'?'BLOCK_MEDIUM_AND_ABOVE':'BLOCK_NONE'})) : cats.map(c=>({category:c,threshold:c==='HARM_CATEGORY_SEXUALLY_EXPLICIT'?'BLOCK_MEDIUM_AND_ABOVE':'BLOCK_ONLY_HIGH'}));
-      r=await fetch(`${P.base}/models/${model}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},
-        body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,safetySettings:th,generationConfig:{temperature:opts.temperature??0.95,maxOutputTokens:max+600,...(opts.json?{responseMimeType:'application/json'}:{})}})});
+      r=await fetch(`${P.base}/models/${model}:${stream?'streamGenerateContent?alt=sse':'generateContent'}`,{method:'POST',signal:ac.signal,headers:{'Content-Type':'application/json','x-goog-api-key':key},
+        body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,safetySettings:th,generationConfig:{temperature:opts.temperature??0.95,topP:0.95,maxOutputTokens:max+600,...(opts.json?{responseMimeType:'application/json'}:{})}})});
     } else {
       const body={model,messages,temperature:opts.temperature??0.95,...(opts.json?{response_format:{type:'json_object'}}:{})};
-      body.max_completion_tokens=max;
+      body.max_completion_tokens=max; body.top_p=0.95; if(stream) body.stream=true;
       if(gpt(model)) body.reasoning_effort='low';
       if(prov==='groq'&&/qwen/.test(model)) body.reasoning_format='hidden';
-      r=await fetch(`${P.base}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+      r=await fetch(`${P.base}/chat/completions`,{method:'POST',signal:ac.signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
     }
-  }catch(e){ throw new ProvErr(prov,0,'red'); }
+  }catch(e){ clearTimeout(to); throw new ProvErr(prov,ac.signal.aborted?408:0,ac.signal.aborted?'tardó demasiado':'red'); }
+  clearTimeout(to);
   if(!r.ok){ const j=await r.json().catch(()=>({})); const er=Array.isArray(j)?j[0]?.error:j?.error; const msg=JSON.stringify(j); throw new ProvErr(prov,/API_KEY_INVALID|API key not valid|PERMISSION_DENIED/i.test(msg)?401:r.status,String(er?.code||er?.status||er?.message||j?.message||r.status).slice(0,80)); }
+  if(stream && r.body){
+    // lectura SSE: líneas "data: {...}"; perro guardián de 12 s sin datos
+    const rd=r.body.getReader(), dec=new TextDecoder(); let buf='', out='', why='', wd;
+    const arm=()=>{ clearTimeout(wd); wd=setTimeout(()=>{ try{ rd.cancel(); }catch{} },12000); }; arm();
+    try{ for(;;){ const {done,value}=await rd.read(); if(done) break; arm(); buf+=dec.decode(value,{stream:true});
+        let i; while((i=buf.indexOf('\n'))>=0){ const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
+          if(!line.startsWith('data:')) continue; const js=line.slice(5).trim(); if(!js||js==='[DONE]') continue;
+          let j; try{ j=JSON.parse(js); }catch{ continue; }
+          const piece= prov==='gemini' ? (j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('') : (j.choices?.[0]?.delta?.content||'');
+          if(prov==='gemini'){ why=j.promptFeedback?.blockReason||j.candidates?.[0]?.finishReason||why; }
+          if(piece){ out+=piece; opts.onDelta(out); } } } }
+    finally{ clearTimeout(wd); }
+    if(!out.trim()){ const e=new ProvErr(prov,200,'respuesta '+(why||'vacía')); e.refusal=true; throw e; }
+    return out;
+  }
   const d=await r.json();
   const t= prov==='gemini' ? (d.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('') : d.choices?.[0]?.message?.content;
   if(!t){ const why=d.promptFeedback?.blockReason||d.candidates?.[0]?.finishReason||'vacía'; const e=new ProvErr(prov,200,'respuesta '+why); e.refusal=true; throw e; }
@@ -173,6 +193,8 @@ export async function listModels(prov,key){
   LS.set('bff_models_'+prov,{t:Date.now(),list:out.slice(0,8)}); return out;
 }
 export const groqModels=key=>listModels('groq',key); // compat
+// precalienta la lista de modelos (caché 24 h) en segundo plano al abrir la app
+export function warmModels(){ for(const p of Object.keys(PROVIDERS)){ const k=provKey(p), c=LS.get('bff_models_'+p,null); if(k&&!(c&&Date.now()-c.t<864e5)) listModels(p,k).catch(()=>{}); } }
 function modelList(prov,adult){ const P=PROVIDERS[prov], c=LS.get('bff_models_'+prov,null); const pref=adult?P.adult:P.pref;
   if(c&&Date.now()-c.t<864e5&&c.list.length){ const s=pref.filter(m=>c.list.includes(m)); return (s.length?s:c.list).slice(0,3); } return pref.slice(0,2); }
 // negativa típica (para reintentar con el siguiente modelo en modo +18)
@@ -182,21 +204,22 @@ async function viaProvider(prov, messages, opts){
   const key=provKey(prov); let list=modelList(prov,opts.adult), last, refused=0;
   for(let pass=0;pass<2;pass++){
     for(const m of list){
-      try{ const t=clean(await call(prov,key,m,messages,opts)); if(isRefusal(t)){ refused++; last=Object.assign(new ProvErr(prov,200,'se negó'),{refusal:true}); continue; } return {text:t, via:prov, model:m}; }
-      catch(e){ last=e; if(e.refusal){ refused++; continue; } if([401,402,403,429,0].includes(e.status)) throw e; } }
+      const o2=opts.onDelta? {...opts,onDelta:raw=>{ const t=streamClean(raw); if(t.length>=160&&!isRefusal(t)) opts.onDelta(t); }} : opts;
+      try{ const t=clean(await call(prov,key,m,messages,o2)); if(isRefusal(t)){ refused++; last=Object.assign(new ProvErr(prov,200,'se negó'),{refusal:true}); continue; } return {text:t, via:prov, model:m}; }
+      catch(e){ last=e; if(e.refusal){ refused++; continue; } if([401,402,403,429,0,408].includes(e.status)) throw e; } }
     if(pass===0 && !refused){ try{ list=(await listModels(prov,key)).filter(m=>!list.includes(m)).slice(0,3); }catch(e){ break; } if(!list.length) break; } else break;
   } throw last||new ProvErr(prov,404,'sin modelos');
 }
 export class Wait extends Error{ constructor(s){ super('wait'); this.wait=s; } }
 async function polli(messages, opts={}){
   const eps=['https://text.pollinations.ai/openai']; let err; // gen.pollinations.ai ya exige llave (401), se quitó
-  for(let i=0;i<3;i++){
-    const ep=eps[0]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),40000);
+  for(let i=0;i<2;i++){
+    const ep=eps[0]; const c=new AbortController(); const to=setTimeout(()=>c.abort(),25000);
     try{ const r=await fetch(ep,{method:'POST',signal:c.signal,headers:{'Content-Type':'application/json'},
         body:JSON.stringify({model:'openai',messages,temperature:opts.temperature??1, private:true})});
       if(r.status===402||r.status===429){ const ra=+r.headers.get('retry-after'); const j=await r.json().catch(()=>({})); const mm=String(j?.error?.message||'').match(/after\s*(\d+)\s*s/i); throw new Wait(ra>0?ra:mm?+mm[1]:45); }
       if(!r.ok) throw new Error('polli '+r.status); const d=await r.json(); const t=d.choices?.[0]?.message?.content; if(!t) throw new Error('vacío'); return t;
-    } catch(e){ if(e instanceof Wait) throw e; err=e; await new Promise(r=>setTimeout(r,1200*(i+1))); } finally{ clearTimeout(to); }
+    } catch(e){ if(e instanceof Wait) throw e; err=e; if(i<1) await new Promise(r=>setTimeout(r,800)); } finally{ clearTimeout(to); }
   } throw err||new Error('polli ocupado');
 }
 // cadena: proveedores con llave (en el orden del modo) -> Pollinations sin llave. En +18, una negativa pasa al siguiente.
@@ -211,6 +234,7 @@ export async function complete(messages, opts={}){
   catch(e){ if(e instanceof Wait){ e.errs=errs; if(!refusals) throw e; } else if(!refusals){ e.errs=errs; throw e; } }
   return {text:'', refused:true, via:'respaldo', errs};
 }
+function streamClean(t){ return clean(String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/<think>[\s\S]*$/,'')); }
 function clean(t){ return String(t||'').replace(/<think>[\s\S]*?<\/think>/g,'').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/__([^_]+)__/g,'$1').replace(/^#{1,4}\s+/gm,'').replace(/^\s*(Vale|Asistente)\s*:\s*/i,'').trim(); }
 
 // ---------- perfil implícito ----------

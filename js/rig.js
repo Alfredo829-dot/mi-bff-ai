@@ -3,7 +3,11 @@ const VS = `
 attribute vec2 aPos; attribute vec2 aUV; varying vec2 vUV;
 void main(){ vUV=aUV; gl_Position=vec4(aPos,0.0,1.0); }`;
 const FS_PUP = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 varying vec2 vUV;
 uniform sampler2D uTex, uMask; uniform vec2 uSize; uniform float uAlpha;
 uniform vec3 uHair; uniform float uHairOn; uniform vec3 uEye; uniform float uEyeOn; uniform vec3 uEar; uniform float uEarOn;
@@ -32,9 +36,28 @@ void main(){
  if(uEarOn>0.5 && m.b>0.02) rgb=mix(rgb,recolor(rgb,uEar),m.b);
  if(uFace>0.5){
   if(uBlink>0.02){ rgb=lid(rgb,px,uEyeL); rgb=lid(rgb,px,uEyeR); }
-  if(uOpen>0.03){ vec2 q=px-uMouth.xy; float ry=uOpen*6.5*clamp(uMouth.z/10.,0.35,1.); q.y-=ry*0.55; float rx=uMouth.z*(0.55+0.25*uOpen);
-   float e=(q.x*q.x)/(rx*rx)+(q.y*q.y)/(ry*ry);
-   if(e<1.){ vec3 mc=vec3(0.36,0.09,0.12); if(q.y<-ry*0.45) mc=vec3(0.96,0.93,0.92); rgb=mix(rgb,mc,smoothstep(1.,0.75,e)); } }
+  if(uOpen>0.02){
+   // 1) borrar la boca dibujada: rellenar con piel interpolada por fila desde los lados (respeta el sombreado)
+   vec2 mc0=uMouth.xy+vec2(0.,0.6); float hw=uMouth.z*1.45, hh=max(2.6,uMouth.z*0.62);
+   vec2 q0=(px-mc0)/vec2(hw, px.y<mc0.y? max(2.6,uMouth.z*0.85) : hh); float e0=dot(q0,q0);
+   if(e0<1.){
+    float ht=max(2.6,uMouth.z*0.85);
+    vec2 P0=vec2(mc0.x-hw*1.3,px.y), P1=vec2(mc0.x+hw*1.3,px.y), P2=vec2(px.x,mc0.y-ht*1.25), P3=vec2(px.x,mc0.y+hh*1.35);
+    vec4 s0=texture2D(uTex,P0/uSize), s1=texture2D(uTex,P1/uSize), s2=texture2D(uTex,P2/uSize), s3=texture2D(uTex,P3/uSize);
+    vec3 c0=s0.rgb/max(s0.a,.01), c1=s1.rgb/max(s1.a,.01), c2=s2.rgb/max(s2.a,.01), c3=s3.rgb/max(s3.a,.01);
+    float w0=s0.a*exp(-dot(c0-uSkin,c0-uSkin)*14.)/max(1.,distance(px,P0)), w1=s1.a*exp(-dot(c1-uSkin,c1-uSkin)*14.)/max(1.,distance(px,P1)),
+          w2=s2.a*exp(-dot(c2-uSkin,c2-uSkin)*14.)/max(1.,distance(px,P2)), w3=s3.a*exp(-dot(c3-uSkin,c3-uSkin)*14.)/max(1.,distance(px,P3));
+    float ws=w0+w1+w2+w3; vec3 fill=(c0*w0+c1*w1+c2*w2+c3*w3+uSkin*1e-4)/(ws+1e-4);
+    rgb=mix(rgb,fill,smoothstep(1.,0.7,e0)*smoothstep(0.55,0.95,c.a)*smoothstep(0.02,0.09,uOpen)); }
+   // 2) boca abierta estilo anime encima: arriba más plana, abajo redonda; interior oscuro, lengua suave, dientes solo muy abierta
+   float sc=clamp(uMouth.z/10.,0.3,1.); float ry=(0.7+uOpen*3.9)*sc*1.15; float rx=uMouth.z*(0.5+0.16*uOpen);
+   vec2 q=px-mc0; q.y+=ry*0.1; float yy=q.y<0.? q.y/(ry*0.55) : q.y/ry; float e=(q.x*q.x)/(rx*rx)+yy*yy;
+   if(e<1.){ vec3 inn=vec3(0.30,0.07,0.09);
+    float tg=smoothstep(0.75,0.15,length(vec2(q.x/(rx*0.75),(q.y-ry*0.85)/(ry*0.6))))*smoothstep(0.25,0.6,uOpen);
+    inn=mix(inn,vec3(0.86,0.42,0.46),tg*0.9);
+    if(uOpen>0.45){ float th=smoothstep(-0.55,-0.85,yy)*smoothstep(0.45,0.7,uOpen); inn=mix(inn,vec3(0.97,0.95,0.94),th*0.9); }
+    vec3 edge=vec3(0.36,0.14,0.13); vec3 col=mix(inn,edge,smoothstep(0.62,0.95,e));
+    rgb=mix(rgb,col,smoothstep(1.,0.85,e)); } }
  }
  rgb*=uTint;
  float a=c.a*uAlpha; gl_FragColor=vec4(rgb*a,a);

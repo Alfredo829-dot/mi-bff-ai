@@ -106,3 +106,8 @@ body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,bod
 #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
 #ambience{position:absolute;inset:0;pointer-events:none;z-index:1;transition:background 2s}
 #vig{position:absolute;inset:0;pointer-events:none;z-index:1;background:radial-gradient(ellipse at 50% 42%,transparent 55%,#00000055 100%)}
+
+/* v1.4.7: ↻ otra respuesta en el último mensaje de ella */
+.regen{display:none;margin-left:6px;padding:0 6px;border:0;border-radius:9px;background:#ffffff1a;color:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.m.her.last .regen{display:inline-block}.regen:active{transform:scale(.9)}
+#bubble.side:after{display:none}
