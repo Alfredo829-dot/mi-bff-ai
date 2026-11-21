@@ -9,9 +9,6 @@ html,body{margin:0;height:100%;background:#120a1a;color:#eee;font-family:system-
 #loader.out{opacity:0;pointer-events:none}
 @keyframes pulse{50%{opacity:.6;transform:scale(.98)}}
 #gear{position:absolute;top:calc(env(safe-area-inset-top) + 10px);right:10px;z-index:6;width:38px;height:38px;border-radius:50%;border:0;background:#0006;color:#fff;font-size:20px;backdrop-filter:blur(6px)}
-#hints{position:absolute;inset:0;pointer-events:none;z-index:3}
-#hints span{position:absolute;transform:translate(-50%,-50%);font-size:12px;padding:4px 9px;border-radius:12px;background:#0008;color:#fff;border:1px solid #ffffff40;backdrop-filter:blur(4px);animation:hint 1.6s ease-in-out infinite;white-space:nowrap;transition:opacity .6s}
-@keyframes hint{50%{transform:translate(-50%,-62%)}}
 #bubble{position:absolute;z-index:4;max-width:min(70vw,320px);transform:translate(-50%,-100%);background:#fff;color:#2a1633;padding:8px 12px;border-radius:16px;font-size:15px;line-height:1.3;box-shadow:0 6px 18px #0006;pointer-events:none;transition:opacity .25s}
 #bubble:after{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-7px;border:7px solid transparent;border-bottom:0;border-top-color:#fff}
 #bubble.hide{opacity:0}
@@ -26,6 +23,7 @@ html,body{margin:0;height:100%;background:#120a1a;color:#eee;font-family:system-
 .m.me{align-self:flex-end;background:#005c4b;border-top-right-radius:2px}
 .m .meta{display:block;text-align:right;font-size:11px;color:#ffffff88;margin-top:2px}
 .m .tick{margin-left:3px;color:#ffffff88;letter-spacing:-3px}.m .tick.read{color:#53bdeb}
+.m img.ph{max-width:220px;max-height:220px;object-fit:cover;border-radius:12px;display:block;margin-bottom:4px}
 .m .src{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 .m .src a{font-size:12.5px;color:#9ed7ff;background:#ffffff12;padding:3px 7px;border-radius:8px;text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .m.sys{align-self:center;background:#182229;color:#ffd27a;font-size:12.5px;max-width:92%;text-align:center}
@@ -53,7 +51,7 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
   body.voice-mode #bar{background:transparent}
   body.voice-mode #gear{right:10px}
 }
-/* --- hojas (clóset / ajustes) --- */
+/* --- hojas (ajustes) --- */
 #sheet{position:fixed;inset:0;z-index:20;background:#0007;display:flex;align-items:flex-end;justify-content:center;transition:opacity .25s}
 #sheet.hide{opacity:0;pointer-events:none}
 .sh-in{width:min(100%,560px);max-height:82dvh;overflow-y:auto;background:#1c1226;border-radius:20px 20px 0 0;padding:12px 14px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -10px 30px #000a}
@@ -76,7 +74,7 @@ body.voice-mode #bar{background:linear-gradient(transparent,#000c)}
 .prog{height:6px;background:#ffffff1a;border-radius:6px;overflow:hidden;margin-top:6px}.prog i{display:block;height:100%;width:0;background:#ff7ac6}
 
 .m .meta .via{font-size:10px;opacity:.8;margin-right:4px}.m .meta .via.respaldo{color:#ffd27a}.m .meta .via.groq{color:#9ff0b0}
-body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,body.capture #hints{display:none!important}
+body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble{display:none!important}
 .kb{display:grid;grid-template-columns:78px 1fr;gap:4px 8px;align-items:center;margin:6px 0}.kb .kn{font-size:13px;opacity:.85}.kb .note{grid-column:1/3;margin:0}
 .m .meta .via.key{color:#9ff0b0}
 /* --- pulido v1.3 --- */
@@ -100,7 +98,6 @@ body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,bod
 .sh-in::-webkit-scrollbar{width:0}
 #chat header small{transition:color .2s}
 .card{transition:transform .15s,border-color .2s}.card:active{transform:scale(.96)}
-#hints span{font-weight:600;box-shadow:0 2px 10px #0006}
 
 /* --- ambiente v1.4: polvo, luz por hora y viñeta --- */
 #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
@@ -111,3 +108,9 @@ body.capture #bar,body.capture #chat,body.capture #gear,body.capture #bubble,bod
 .regen{display:none;margin-left:6px;padding:0 6px;border:0;border-radius:9px;background:#ffffff1a;color:inherit;font-size:12px;line-height:18px;cursor:pointer}
 .m.her.last .regen{display:inline-block}.regen:active{transform:scale(.9)}
 #bubble.side:after{display:none}
+
+/* v1.5.2 (+18): sonrojo al reaccionar físicamente; dado solo visible en modo +18 */
+#blush{position:absolute;inset:0;pointer-events:none;z-index:2;opacity:0;background:radial-gradient(ellipse at 50% 28%,#ff4d6d66 0%,#ff4d6d22 45%,transparent 65%);transition:opacity .7s}
+body.blushing #blush{opacity:1}
+#dice{display:none}
+body.adult #dice{display:block}
