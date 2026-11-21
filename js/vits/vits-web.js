@@ -151,7 +151,8 @@ async function D(e) {
 }
 async function S(e, m) {
   var r;
-  const n = await fetch(e), o = (r = n.body) == null ? void 0 : r.getReader(), a = +(n.headers.get("Content-Length") ?? 0);
+  const n = await fetch(e); if(!n.ok) throw new Error('HTTP '+n.status+' al descargar '+e);
+  const o = (r = n.body) == null ? void 0 : r.getReader(), a = +(n.headers.get("Content-Length") ?? 0);
   let i = 0, t = [];
   for (; o; ) {
     const { done: s, value: d } = await o.read();

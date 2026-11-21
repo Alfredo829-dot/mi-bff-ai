@@ -8,6 +8,7 @@ export function audioLevel(){ if(!analyser) return level; _ab=_ab||new Uint8Arra
   let s=0; for(const v of a){ const d=(v-128)/128; s+=d*d; } return Math.min(1,Math.sqrt(s/a.length)*5.5); }
 function ac(){ if(!ctx){ ctx=new (window.AudioContext||window.webkitAudioContext)(); analyser=ctx.createAnalyser(); analyser.fftSize=1024; analyser.connect(ctx.destination); } if(ctx.state==='suspended') ctx.resume(); return ctx; }
 export function unlockAudio(){ try{ ac(); }catch{} }
+export async function clearPiperCache(){ tts=tts||await import('./vits/vits-web.js'); await tts.flush(); }
 export async function piperReady(){ try{ tts=tts||await import('./vits/vits-web.js'); const s=await tts.stored(); return s.includes('es_MX-claude-high'); }catch{ return false; } }
 export async function preparePiper(onProg){ tts=tts||await import('./vits/vits-web.js');
   await tts.download('es_MX-claude-high', p=>onProg&&p.total&&onProg(p.loaded/p.total)); }

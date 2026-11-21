@@ -2,7 +2,7 @@ import { Renderer, Puppet, loadImage } from './rig.js';
 import { LS, BASE_PERSONA, profileText, guard, minorSignal, researchQuery, webSearch, complete, updateProfile, localProfile, hasGroq, cleanKey, PROVIDERS, provKey, listModels, provErrText, ADULT_RULES } from './ai.js';
 import * as V from './voice.js';
 
-const VERSION='1.4.2'; // única versión: también nombra la caché del service worker
+const VERSION='1.4.6'; // única versión: también nombra la caché del service worker
 const $=s=>document.querySelector(s);
 const ROOM={w:1248,h:832};
 // ---------- catálogo (agregar más outfits aquí; 'ready' = tiene poses y clips con el cuarto nuevo) ----------
@@ -32,7 +32,7 @@ let hist=LS.get('bff_hist',[]);
 const saveCfg=()=>LS.set('bff_cfg',cfg), saveLook=()=>LS.set('bff_look',look), saveHist=()=>LS.set('bff_hist',hist.slice(-200));
 let R=null; // se crea en boot() para poder avisar si no hay WebGL
 let bgTex, pup={}, meta={};
-const her={spot:'idle',mode:'stand',phone:0,phoneT:0,show:1,squash:1,hop:0,typingDesk:false,walking:false};
+const her={spot:'idle',mode:'stand',phone:0,phoneT:0,phoneHold:0,squash:1,hop:0,typingDesk:false};
 const P={breath:0,blink:0,headTilt:0,nod:0,headTurn:0,hip:0,lean:0,armL:0,armR:0,hairAmp:1,hairWind:0,typing:0,open:0};
 const G={tilt:0,nod:0,armL:0,armR:0,turn:0}; let gestT=0;
 let talking=false, fakeTalkUntil=0, herTyping=false, userTyping=0, voiceMode=false, busy=false, lastPoke=0;
@@ -40,7 +40,7 @@ let cam={k:1,cx:646,cy:416,ax:0,ay:0,aw:1,ah:1}, camX=SPOTS.idle.cx, camY=416, f
 
 // ---------- carga ----------
 const prog=p=>{ $('#loader .lbar i').style.width=Math.round(p*100)+'%'; };
-async function loadMeta(id){ if(!meta[id]) meta[id]=await fetch(`img2/poses-${id}.json`).then(r=>r.json()); return meta[id]; }
+async function loadMeta(id){ if(!meta[id]) meta[id]=await fetch(`img2/poses-${id}.json`).then(r=>{ if(!r.ok) throw new Error('poses '+r.status); return r.json(); }); return meta[id]; }
 async function loadOutfit(id, all=false){
   const M=await loadMeta(id); const need=all? Object.keys(M) : ['stand','phone'];
   await Promise.all(need.map(async k=>{ const key=k+'-'+id; if(pup[key]||!M[k]) return;
@@ -233,7 +233,7 @@ function markRead(){ for(const m of hist) if(m.role==='user'&&!m.read){ m.read=t
 function systemPrompt(extra=''){
   const persona=(cfg.dev&&cfg.persona.trim())? cfg.persona : BASE_PERSONA(cfg.name);
   const now=new Date(); const where={idle:'parada en tu cuarto',bed:'echada en tu cama',closet:'frente a tu clóset',desk:'en tu compu'}[her.spot]||'en tu cuarto';
-  const ctx=`\nAhora: ${now.toLocaleString('es-MX',{weekday:'long',hour:'2-digit',minute:'2-digit'})}. Estás ${where}, vestida con tu outfit "${OUTFITS.find(o=>o.id===look.outfit).name}".`+
+  const ctx=`\nAhora: ${now.toLocaleString('es-MX',{weekday:'long',hour:'2-digit',minute:'2-digit'})}. Estás ${where}, vestida con tu outfit "${(OUTFITS.find(o=>o.id===look.outfit)||OUTFITS[0]).name}".`+
     (voiceMode? ' Están platicando EN PERSONA, frente a frente: habla natural para decirse en voz alta, sin emojis ni links.' : ' Están platicando por WhatsApp desde tu cel: escribe como mensaje de WhatsApp.');
   return persona+(cfg.adult?ADULT_RULES(cfg.name):'')+ctx+profileText(LS.get('bff_profile',{}))+extra;
 }
@@ -257,8 +257,11 @@ async function speakLine(text){
 }
 let warnedSys=false;
 let pending=false, limitWarned=false;
+let lastUserAt=Date.now(), nudged=false;
+setInterval(()=>{ if(nudged||busy||talking||!hist.some(m=>m.role==='user')) return; if(Date.now()-lastUserAt<240000) return; nudged=true;
+  const l=pick(['¿Sigues ahí? 😏 Cuéntame algo, ando aburrida…','Oye, ¿te dormiste? 😂 Aquí sigo, ¿eh?','¿Qué onda? Ya me dejaste en visto 👀 cuéntame el chisme']); push({role:'assistant',content:l}); say(l,3000); fakeTalkUntil=T+1.5; },30000);
 async function send(text){
-  text=text.trim(); if(!text) return; V.unlockAudio();
+  text=text.trim(); if(!text) return; V.unlockAudio(); lastUserAt=Date.now(); nudged=false;
   push({role:'user',content:text}); userCount++; LS.set('bff_ucount',userCount); localProfile(text);
   if(busy){ pending=true; return; }
   busy=true;
@@ -273,8 +276,9 @@ const DEFLECT=['Jajaja uy, me pusiste roja 🙈 Ahorita se me trabó la cabeza, 
 async function askAI(msgs){
   for(let i=0;i<4;i++){
     try{ const r=await complete(msgs,{adult:!!cfg.adult}); warnErrs(r.errs); if(r.refused) return {text:pick(DEFLECT),via:r.via}; return r; }
-    catch(e){ warnErrs(e.errs); if(e.wait){ if(!limitWarned){ limitWarned=true; push({role:'sys',content:`La IA gratis sin llave deja ~1 respuesta cada ${e.wait||45} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis (⚙) contesto al instante.'}`}); }
-        await sleep((Math.min(60,e.wait||45)+1)*1000); continue; }
+    catch(e){ warnErrs(e.errs); if(e.wait){ const w=Math.min(60,e.wait||45);
+        push({role:'sys',content:limitWarned?`⏳ Espero ${w} s y lo reintento…`:`La IA gratis sin llave deja ~1 respuesta cada ${w} s, por eso tardo. ${hasGroq()?'':'Con una llave gratis (⚙) contesto al instante.'}`}); limitWarned=true;
+        await sleep((w+1)*1000); continue; }
       break; }
   }
   return {text:pick(['Uy, se me trabó el cel 😩 ¿me lo repites?','Ay, se me fue el internet wey, dame chance y repítemelo 🙏'])};
@@ -313,7 +317,8 @@ async function research(q,orig){
 function intro(){
   const first=!hist.length; const p=LS.get('bff_profile',{}); const nom=p.apodo||p.nombre;
   her.hop=1; her.squash=0.92;
-  const line= first? `¡Quiubo! 👋 Por fin alguien que me pela. Soy ${cfg.name}, tu nueva BFF. ¿Qué onda contigo, qué tal tu día? Cuéntame el chisme 😏`
+  const h=new Date().getHours(); const saludo=h<6?'¡Quiubo! 👋 ¿Qué haces despierto a estas horas?':h<12?'¡Buenos días! ☀️':h<20?'¡Quiubo! 👋':'¡Buenas noches! 🌙';
+  const line= first? `${saludo} Por fin alguien que me pela. Soy ${cfg.name}, tu nueva BFF. ¿Qué onda contigo, qué tal tu día? Cuéntame el chisme 😏`
     : pick([`¡Ya volviste${nom?', '+nom:''}! 🙌 Te extrañé, ¿eh? ¿Qué me cuentas?`,`¡Eyyy${nom?' '+nom:''}! 😏 ¿Qué milagro? Échame el chisme.`,`Mira nomás quién regresó${nom?', '+nom:''} 😂 ¿Qué traes?`]);
   render(); say(first?'¡Quiubo! 👋':'¡Eyyy! 👋',2600); const introLen=hist.length;
   setTimeout(()=>{ if(hist.length!==introLen) return; setTyping(true); },400);
@@ -348,7 +353,7 @@ function poke(){ const t=performance.now(); if(t-lastPoke<800) return; lastPoke=
 
 // ---------- barra de texto / mic ----------
 const txt=$('#txt');
-txt.addEventListener('input',()=>{ txt.style.height='auto'; txt.style.height=Math.min(120,txt.scrollHeight)+'px'; userTyping=T+2.5; layout(); });
+txt.addEventListener('input',()=>{ txt.style.height='auto'; txt.style.height=Math.min(120,txt.scrollHeight)+'px'; userTyping=T+2.5; lastUserAt=Date.now(); nudged=false; layout(); });
 txt.addEventListener('focus',()=>{ userTyping=T+3; });
 txt.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); $('#bar').requestSubmit(); } });
 $('#bar').addEventListener('submit',e=>{ e.preventDefault(); const v=txt.value; txt.value=''; txt.style.height='auto'; send(v); });
@@ -369,8 +374,8 @@ let dlP=null;
 function downloadVoice(onp){
   if(dlP) return dlP; const m=push({role:'sys',content:'Bajando mi voz natural (una sola vez, ~63 MB)… 0%'});
   dlP=V.preparePiper(p=>{ const t=`Bajando mi voz natural (una sola vez, ~63 MB)… ${Math.round(p*100)}%`; m.content=t; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=t; onp&&onp(p); })
-    .then(()=>{ m.content='¡Listo! Ya tengo mi voz 🎙️'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; })
-    .catch(e=>{ dlP=null; m.content='No pude bajar la voz natural (¿sin internet?). Mientras, uso la del sistema.'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; });
+    .then(()=>{ m.content='¡Listo! Ya tengo mi voz 🎙️'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; return true; })
+    .catch(e=>{ dlP=null; m.content='No pude bajar la voz natural (¿sin internet?). Mientras, uso la del sistema.'; if(m._el&&m._el.isConnected) m._el.firstChild.textContent=m.content; return false; });
   return dlP;
 }
 
@@ -402,9 +407,10 @@ async function openSettings(){
   const ready=await V.piperReady();
   sheet('Ajustes',`
    <div class="row"><label>Nombre de tu BFF</label><input type="text" id="sName" maxlength="20" value="${esc(cfg.name)}"></div>
+   <p class="note">💬 Llevan ${userCount} mensajes tuyos y ${hist.filter(m=>m.role==='assistant').length} míos.</p>
    <div class="row"><label>Voz</label><select id="sVoice">${V.VOICES.map(v=>`<option value="${v.id}" ${cfg.voice===v.id?'selected':''}>${v.name}</option>`).join('')}<option value="none" ${cfg.voice==='none'?'selected':''}>Sin voz</option></select>
      <p class="note" id="vNote">${ready?'✅ Voz natural ya descargada (funciona sin internet).':'La voz natural se descarga una vez (~63 MB) y luego funciona sin internet.'}</p>
-     ${ready?'':'<button class="btn" id="sDl">⬇️ Descargar voz natural</button><div class="prog"><i id="sProg"></i></div>'}</div>
+     ${ready?'<button class="btn" id="sDel">🗑️ Borrar voz descargada</button>':'<button class="btn" id="sDl">⬇️ Descargar voz natural</button><div class="prog"><i id="sProg"></i></div>'}</div>
    <div class="row sw-row"><label style="margin:0">Leer en voz alta también en modo texto</label><input type="checkbox" id="sRead" ${cfg.readAloud?'checked':''}></div>
    <div class="row sw-row"><label style="margin:0">🔞 Modo +18 (solo texto)</label><input type="checkbox" id="sAdult" ${cfg.adult?'checked':''}></div>
    <p class="note" style="margin-top:-6px">Plática coqueta/subida de tono entre adultos, solo texto. Su ropa, poses y animaciones no cambian. Apagado por defecto.</p>
@@ -432,7 +438,8 @@ async function openSettings(){
       else cfg.adult=false; saveCfg(); };
     el.querySelector('#sDev').onchange=e=>{ cfg.dev=e.target.checked; saveCfg(); el.querySelector('#devBox').style.display=cfg.dev?'block':'none'; };
     el.querySelector('#sPersona').onchange=e=>{ cfg.persona=e.target.value; saveCfg(); };
-    const dl=el.querySelector('#sDl'); if(dl) dl.onclick=()=>{ dl.disabled=true; dl.textContent='Descargando…'; downloadVoice(p=>{ const i=el.querySelector('#sProg'); if(i) i.style.width=Math.round(p*100)+'%'; }).then(()=>{ dl.textContent='✅ Lista'; }); };
+    const dl=el.querySelector('#sDl'); if(dl) dl.onclick=()=>{ dl.disabled=true; dl.textContent='Descargando…'; downloadVoice(p=>{ const i=el.querySelector('#sProg'); if(i) i.style.width=Math.round(p*100)+'%'; }).then(ok=>{ dl.textContent=ok?'✅ Lista':'❌ No se pudo, reintenta'; dl.disabled=ok; }); };
+    const del=el.querySelector('#sDel'); if(del) del.onclick=async()=>{ if(!confirm('¿Borrar la voz natural descargada? Se puede volver a descargar después.')) return; del.disabled=true; del.textContent='Borrando…'; await V.clearPiperCache(); del.textContent='✅ Borrada'; const vn=el.querySelector('#vNote'); if(vn) vn.textContent='Voz borrada. Puedes volver a descargarla.'; };
     el.querySelector('#sReset').onclick=()=>{ if(!confirm('¿Seguro? '+cfg.name+' va a olvidar todo lo que platicaron.')) return;
       ['bff_hist','bff_profile','bff_ucount','bff_stats'].forEach(LS.del); hist=[]; userCount=0; cfg.adult=false; saveCfg(); closeSheet(); render(); intro(); };
   });
