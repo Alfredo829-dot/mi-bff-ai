@@ -1,1 +1,122 @@
-{"stand":{"off":[510,62],"size":[264,761],"L":{"kind":"body","cx":136,"neckY":136,"shoulderY":152,"waistY":252,"legTop":383,"kneeY":528,"footY":753,"armL":[55,78],"armR":[194,221],"handY":398,"eyes":[[124,77],[159,86]],"eyeR":[8.5,5.6],"eyeAng":0.25,"mouth":[136,107],"mouthW":10,"cheek":[120,96],"skin":[0.914,0.675,0.6]}},"phone":{"off":[518,64],"size":[254,756],"L":{"kind":"body","cx":128,"neckY":134,"shoulderY":150,"waistY":250,"legTop":381,"kneeY":526,"footY":749,"armL":null,"armR":null,"handY":0,"thumbs":[122,141],"eyes":[[116,75],[150,83]],"eyeR":[8.5,5.6],"eyeAng":0.23,"mouth":[128,104],"mouthW":10,"cheek":[112,94],"skin":[0.902,0.675,0.608]}},"bed":{"off":[190,135],"size":[469,628],"L":{"kind":"body","cx":239,"neckY":120,"shoulderY":135,"waistY":216,"legTop":308,"kneeY":308,"footY":523,"armL":null,"armR":null,"handY":0,"eyes":[[232,75],[257,79]],"eyeR":[8,5.5],"eyeAng":0.16,"mouth":[241,98],"mouthW":9,"cheek":[230,91],"skin":[0.875,0.655,0.588]}},"bedphone":{"off":[314,143],"size":[374,591],"L":{"kind":"body","cx":115,"neckY":119,"shoulderY":134,"waistY":212,"legTop":300,"kneeY":300,"footY":517,"armL":null,"armR":null,"handY":0,"thumbs":[141,127],"eyes":[[110,77],[135,81]],"eyeR":[8,5.5],"eyeAng":0.16,"mouth":[119,100],"mouthW":9,"cheek":[109,94],"skin":[0.886,0.655,0.588]}},"desk":{"off":[750,186],"size":[388,565],"L":{"kind":"desk","neckY":137,"neck":[164,137],"headX0":109,"hands":[262,210],"eyes":[[168,86],[177,87]],"mouth":[174,106.5],"cheek":[172,93],"eyeR":[5.5,3.8],"eyeAng":0.11,"mouthW":4.5,"jawR":[22,15],"skin":[0.914,0.675,0.6]}},"closet":{"off":[524,65],"size":[246,632],"L":{"kind":"desk","neckY":107,"neck":[131,107],"headX0":101,"hands":[-1523,-1064],"eyes":[[100,66],[100,66]],"mouth":[98.5,80],"cheek":[103,78],"eyeR":[3,2],"eyeAng":0,"mouthW":2.5,"jawR":[12,8],"skin":[0.914,0.675,0.6]}}}
+{
+ "stand": {
+  "off": [
+   507,
+   58
+  ],
+  "size": [
+   269,
+   690
+  ],
+  "L": {
+   "kind": "body",
+   "cx": 139.4,
+   "neckY": 138,
+   "shoulderY": 154,
+   "waistY": 254,
+   "legTop": 386,
+   "kneeY": 531,
+   "footY": 687,
+   "armL": [
+    38,
+    64
+   ],
+   "armR": [
+    212,
+    240
+   ],
+   "handY": 399,
+   "eyes": [
+    [
+     123.6,
+     86.7
+    ],
+    [
+     155.3,
+     90.6
+    ]
+   ],
+   "eyeR": [
+    11.5,
+    7.0
+   ],
+   "eyeAng": 0.12,
+   "mouth": [
+    138.6,
+    111.0
+   ],
+   "mouthW": 7,
+   "cheek": [
+    119.6,
+    105.7
+   ],
+   "skin": [
+    0.933,
+    0.769,
+    0.788
+   ]
+  }
+ },
+ "phone": {
+  "off": [
+   512,
+   56
+  ],
+  "size": [
+   295,
+   690
+  ],
+  "L": {
+   "kind": "body",
+   "cx": 134.2,
+   "neckY": 156,
+   "shoulderY": 172,
+   "waistY": 269,
+   "legTop": 397,
+   "kneeY": 538,
+   "footY": 689,
+   "armL": [
+    50,
+    80
+   ],
+   "armR": [
+    239,
+    263
+   ],
+   "handY": 400,
+   "eyes": [
+    [
+     117.5,
+     105.7
+    ],
+    [
+     150.9,
+     102.5
+    ]
+   ],
+   "eyeR": [
+    10.5,
+    7.0
+   ],
+   "eyeAng": -0.1,
+   "mouth": [
+    133.5,
+    120.0
+   ],
+   "mouthW": 7,
+   "cheek": [
+    113.5,
+    124.7
+   ],
+   "skin": [
+    0.953,
+    0.82,
+    0.82
+   ],
+   "thumbs": [
+    79.3,
+    191.2
+   ]
+  }
+ }
+}

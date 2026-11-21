@@ -21,7 +21,7 @@
   <canvas id="fx" aria-hidden="true"></canvas>
   <div id="ambience" aria-hidden="true"></div>
   <div id="vig" aria-hidden="true"></div>
-  <div id="hints"></div>
+  <div id="blush" aria-hidden="true"></div>
   <div id="bubble" class="hide"></div>
   <button id="gear" aria-label="Ajustes">⚙</button>
   <section id="chat">
@@ -29,7 +29,9 @@
     <div id="msgs" aria-live="polite"></div>
   </section>
   <form id="bar" autocomplete="off">
+    <button type="button" id="photo" aria-label="Enviar foto">📷</button><input type="file" id="photoIn" accept="image/*" hidden>
     <button type="button" id="mic" aria-label="Micrófono">🎤</button>
+    <button type="button" id="dice" aria-label="Sorpréndeme">🎲</button>
     <textarea id="txt" rows="1" placeholder="Escríbele…" enterkeyhint="send"></textarea>
     <button id="send" aria-label="Enviar">➤</button>
   </form>

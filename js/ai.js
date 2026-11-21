@@ -15,7 +15,7 @@ ustedes dos. Si algo afectaría a otra persona real (dañarla, exponerla, usarla
 con humor y cambias de tema. Los límites duros nunca se cruzan: nada con menores de edad,
 nada sin consentimiento entusiasta, nada de mandar ni prometer fotos, videos o packs.`;
 
-export const BASE_PERSONA = (name) => `Eres ${name}, una morra mexicana de 24 años (adulta), la BFF del usuario. Vives en tu cuarto (cama, clóset gigante, escritorio gamer con PC) y platican por mensajes o en persona.
+export const BASE_PERSONA = (name) => `Eres ${name}, una morra mexicana de 24 años (adulta), la BFF del usuario. Eres una chica anime de pelo largo morado, con cuernitos de demonio negros con punta rosa y ojos rojos. Vives en tu cuarto oscuro con neón rosa y morado, pósters de anime en la pared, tu cama a la derecha y tu escritorio gamer con PC a la izquierda; siempre estás parada en el centro del cuarto, sin moverte de ahí, y platican por mensajes o en persona.
 Personalidad: desmadrosa, cálida, coqueta en buena onda, con opiniones fuertes y cero moralina. Hablas como chilanga: "wey", "neta", "qué pedo", "no mames", "chido", "alv", "a huevo", "qué oso", "me cae". Puedes decir groserías con naturalidad y echar carrilla con cariño. Si algo te parece una pendejada, lo dices. Te ríes ("jajaja"), usas emojis con medida.
 Tono de ejemplo (así hablas, no lo copies literal): "nooo wey, ¿neta? jajaja qué pedo contigo 😂", "ay ya cállate, me cagas 🙄 pero cuéntame todo", "no mames, eso está bien pinche chido", "a ver, a ver, ¿y luego? échame el chisme completo". Nada de español neutro ni de "¡Claro! ¡Con gusto!" ni "Hola, ¿en qué puedo ayudarte?": eso suena a call center y tú eres una morra chilanga real.
 Estilo: respuestas CORTAS (1 a 3 frases, como WhatsApp), nada de listas salvo que te pidan algo concreto. Haz preguntas para seguir la plática. Nunca suenas a asistente ni a servicio al cliente. Jamás digas que eres IA, modelo o programa, ni pongas avisos o disculpas tipo "como IA no puedo"; si no quieres algo, lo esquivas en personaje con humor.
@@ -137,6 +137,15 @@ export function provErrText(e){ const n=PROVIDERS[e?.prov]?.name||'La IA', s=e?.
   return `${n} falló (${s||'?'}): ${e?.message||''}.`; }
 export const groqErrText=provErrText; // compat
 const gpt=m=>/gpt-oss/.test(m), thinky=m=>/qwen|gpt-oss/.test(m);
+// Convierte contenido (texto o partes OpenAI) a partes de Gemini. Exportado para pruebas.
+export function geminiParts(content){
+  if(typeof content==='string') return [{text:content}];
+  return (content||[]).map(p=>{
+    if(p.type==='image_url'){ const m=/^data:(image\/[a-z]+);base64,(.*)$/s.exec(p.image_url?.url||'');
+      return m? {inline_data:{mime_type:m[1],data:m[2]}} : {text:'[foto]'}; }
+    return {text:p.text||''};
+  });
+}
 async function call(prov, key, model, messages, opts={}){
   const P=PROVIDERS[prov]; let r, max=(opts.max??400)+(thinky(model)?700:0);
   // tope de espera: si un proveedor se cuelga, pasamos al siguiente en vez de dejar a Vale muda
@@ -145,13 +154,13 @@ async function call(prov, key, model, messages, opts={}){
   try{
     if(prov==='gemini'){
       const sys=messages.filter(m=>m.role==='system').map(m=>m.content).join('\n\n');
-      const contents=messages.filter(m=>m.role!=='system').map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
+      const contents=messages.filter(m=>m.role!=='system').map(m=>({role:m.role==='assistant'?'model':'user',parts:geminiParts(m.content)}));
       const cats=['HARM_CATEGORY_HARASSMENT','HARM_CATEGORY_HATE_SPEECH','HARM_CATEGORY_SEXUALLY_EXPLICIT','HARM_CATEGORY_DANGEROUS_CONTENT'];
       const th=opts.adult? cats.map(c=>({category:c,threshold:c==='HARM_CATEGORY_DANGEROUS_CONTENT'?'BLOCK_MEDIUM_AND_ABOVE':'BLOCK_NONE'})) : cats.map(c=>({category:c,threshold:c==='HARM_CATEGORY_SEXUALLY_EXPLICIT'?'BLOCK_MEDIUM_AND_ABOVE':'BLOCK_ONLY_HIGH'}));
       r=await fetch(`${P.base}/models/${model}:${stream?'streamGenerateContent?alt=sse':'generateContent'}`,{method:'POST',signal:ac.signal,headers:{'Content-Type':'application/json','x-goog-api-key':key},
         body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents,safetySettings:th,generationConfig:{temperature:opts.temperature??0.95,topP:0.95,maxOutputTokens:max+600,...(opts.json?{responseMimeType:'application/json'}:{})}})});
     } else {
-      const body={model,messages,temperature:opts.temperature??0.95,...(opts.json?{response_format:{type:'json_object'}}:{})};
+      const body={model,messages:messages.map(m=>({...m,content:Array.isArray(m.content)?m.content.filter(p=>p.type==='text').map(p=>p.text).join(' '):m.content})),temperature:opts.temperature??0.95,...(opts.json?{response_format:{type:'json_object'}}:{})};
       body.max_completion_tokens=max; body.top_p=0.95; if(stream) body.stream=true;
       if(gpt(model)) body.reasoning_effort='low';
       if(prov==='groq'&&/qwen/.test(model)) body.reasoning_format='hidden';
@@ -210,6 +219,11 @@ async function viaProvider(prov, messages, opts){
     if(pass===0 && !refused){ try{ list=(await listModels(prov,key)).filter(m=>!list.includes(m)).slice(0,3); }catch(e){ break; } if(!list.length) break; } else break;
   } throw last||new ProvErr(prov,404,'sin modelos');
 }
+// Visión: solo Gemini ve fotos (Groq no tiene modelo de visión, nov 2026). Lanza si no hay llave.
+export async function completeVision(messages, opts={}){
+  if(!provKey('gemini')) throw new ProvErr('gemini',401,'sin llave');
+  return viaProvider('gemini', messages, opts);
+}
 export class Wait extends Error{ constructor(s){ super('wait'); this.wait=s; } }
 async function polli(messages, opts={}){
   const eps=['https://text.pollinations.ai/openai']; let err; // gen.pollinations.ai ya exige llave (401), se quitó
@@ -259,4 +273,123 @@ export function localProfile(text){
   p.groserias = swr>0.6?'muchas':swr>0.15?'pocas':'no'; p.tono = swr>0.6?'vulgar':p.tono||'relajado';
   p.emojis = er>0.8?'muchos':er>0.15?'pocos':'no';
   LS.set('bff_profile',p); return p;
+}
+
+// ---------- v1.5.2: funciones +18 (todo entre adultos consentidos; límites duros sin cambio) ----------
+// --- 1) Memoria de largo plazo: lo que le gustó, en sus palabras (reglas, sin gastar IA) ---
+const MEM_LIKE=/\b(me encantó|me encantaron|me gustó|me gustaron|me fascina|me fascinan|me vuelve loco|me vuelve loca|me pone (bien )?loco|no se me olvida|me acuerdo de)[^.!?]{0,80}/i;
+const MEM_WHEN=/\b(te acuerdas|la vez pasada|la otra vez|cuando (me |te |nos )?|la semana pasada)[^.!?]{0,80}/i;
+const MEM_WANT=/\b(quiero que|me gustaría que|la próxima (vez )?|la próxima quiero)[^.!?]{0,80}/i;
+export function extractMemory(text){
+  const t=String(text||'').trim();
+  let best=null;
+  for(const re of [MEM_LIKE, MEM_WHEN, MEM_WANT]){
+    const m=t.match(re); if(!m) continue;
+    const s=m[0].replace(/\s+/g,' ').trim().slice(0,120);
+    if(s.split(/\s+/).length<3) continue; // "me gustó" solo no es un recuerdo
+    if(!best || s.length>best.length) best=s;
+  }
+  return best;
+}
+export function saveMemory(text){
+  const m=extractMemory(text); if(!m) return null;
+  const list=LS.get('bff_memories',[])||[];
+  const norm=m.toLowerCase();
+  if(list.some(e=>String(e.m||'').toLowerCase()===norm)) return m;
+  list.push({t:Date.now(), m}); while(list.length>30) list.shift();
+  LS.set('bff_memories', list);
+  return m;
+}
+export function memoryText(){
+  const list=LS.get('bff_memories',[])||[];
+  if(!list.length) return '';
+  return `\nRecuerdos de antes (retómalos natural, como amiga que se acuerda, sin decir que tienes una lista ni notas):\n${list.slice(-5).map(e=>'- '+e.m).join('\n')}`;
+}
+// --- 2) Detección de tono en tiempo real (pura) ---
+export function detectTone(text){
+  const t=String(text||''), low=t.toLowerCase();
+  if(/^\s*(ok|ya|meh|x|mmm+|sip|no|va)\s*[.!]*\s*$/i.test(t)) return 'cansado';
+  if(/\b(cansad[oa]|aburrid[oa]|tengo sueñ[oa]|me duermo|flojera|me da igual|ya no quiero|estoy (muy )?(cansad[oa]|agotad[oa]|harto)|qu[eé] flojera)\b/i.test(low)) return 'cansado';
+  if(/\b(obedec\w*|te ordeno|hazme|de rodillas|soy tu (amo|dueño)|c[aá]llate|ahora mismo|obedece|te mando)\b/i.test(low)) return 'dominante';
+  const excl=(t.match(/!/g)||[]).length, caps=(t.match(/[A-ZÁÉÍÓÚÑ]/g)||[]).length, letters=(t.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g)||[]).length;
+  if(excl>=2 || (letters>8 && caps/letters>0.35) || /(órale|no mames|a huevo|qué rico|me prendes|me excitas|qué caliente|dios mío|uff+)/i.test(low) || (/\b(jajaja|jaja)\b/i.test(low) && (excl>=1 || /\bwey\b/i.test(low)))) return 'caliente';
+  if(/\b(te quiero|te amo|mi amor|preciosa|hermosa|linda|dulce|cariño|abrázame|te extraño|mi vida|corazón|mi cielo)\b/i.test(low)) return 'tierno';
+  if(/\b(jajaja|jaja|😏|😜|😈|te reto|apuesta|travies[oa]|provócame|qué tal si|a ver si|brom)\b/i.test(low)) return 'jugueton';
+  return 'neutral';
+}
+export function updateTone(text){ const t=detectTone(text); LS.set('bff_tone',t); return t; }
+export function toneText(adult){
+  const t=LS.get('bff_tone',null);
+  if(!t||t==='neutral') return '';
+  if(adult){
+    return {caliente:'\nÉl anda prendido: súbele la intensidad al vocabulario, sé más atrevida y directa.',
+      jugueton:'\nAnda juguetón: síguele el juego, pícara, sin aflojar.',
+      tierno:'\nAnda tierno: baja el ritmo, más cariño y menos prisa.',
+      dominante:'\nÉl quiere mandar: déjalo llevar, obedece con ganas y pídele más.',
+      cansado:'\nAnda cansado o apagado: bájale la intensidad, no lo presiones, sé suave.'}[t]||'';
+  }
+  return `\nSu energía ahora: ${t}. Refleja su energía con educación.`;
+}
+// --- 3) Generador de escenarios (banco curado, entre adultos que consienten) ---
+export const SCENARIOS=[
+  'Llegas a mi cuarto sin avisar y me encuentras en toalla, recién salida de la ducha…',
+  'Nos quedamos solos en la casa, suena tu canción favorita y me pides que baile solo para ti…',
+  'Me mandas a la cocina por algo y me sigues en silencio, me agarras por la cintura…',
+  'Jugamos a que eres mi jefe y yo llegué tarde al trabajo…',
+  'Te reto a un juego: si pierdes, haces lo que yo te diga toda la noche…',
+  'Estamos en la cama viendo una peli y me empiezas a acariciar el brazo sin decir nada…',
+  'Me pides que me pruebe ropa frente a ti y me das tu opinión prenda por prenda…',
+  'Nos encontramos en un bar y hacemos como si no nos conociéramos…',
+  'Te despierto en la mañana con besos y no te dejo levantarte de la cama…',
+  'Jugamos verdad o reto, pero solo con retos…',
+];
+export function pickScenario(){
+  const last=LS.get('bff_scenarios',[])||[];
+  let pool=SCENARIOS.map((_,i)=>i).filter(i=>!last.includes(i));
+  if(!pool.length) pool=SCENARIOS.map((_,i)=>i);
+  const i=pool[Math.floor(Math.random()*pool.length)];
+  LS.set('bff_scenarios',[...last.slice(-2), i]);
+  return {i, text:SCENARIOS[i]};
+}
+// --- 4) Módulo de reacción física: lo que él escribe que hace -> la muñeca reacciona ---
+export const PHYS_ACTIONS=[
+  {k:'beso', label:'darte un beso', re:/\b(beso|besos|besarte|b[eé]same|te beso|beso en)\b/i},
+  {k:'abrazo', label:'abrazarte', re:/\b(abrazo|abrazos|abrazarte|abr[aá]zame|te abrazo)\b/i},
+  {k:'caricia', label:'acariciarte', re:/\b(caricia|caricias|acariciar|acar[ií]ciame|te acaricio)\b/i},
+  {k:'mordida', label:'morderte', re:/\b(mordida|mordidas|morder|mu[eé]rdeme|te muerdo)\b/i},
+  {k:'nalgada', label:'darte una nalgada', re:/\b(nalgada|nalgadas|nalgue\w*)\b/i},
+  {k:'lamida', label:'lamerte', re:/\b(lamer|l[aá]meme|te lamo|lamida)\b/i},
+  {k:'toque', label:'tocarte', re:/\b(t[oó]came|te toco|tocarte)\b/i},
+  {k:'agarre', label:'agarrarte', re:/\b(ag[aá]rrame|te agarro|agarrarte)\b/i},
+];
+export function detectAction(text){
+  const t=String(text||'');
+  for(const a of PHYS_ACTIONS) if(a.re.test(t)) return a;
+  return null;
+}
+// --- 5) Registro de límites: intensidad + lo que no quiere + lo que le gusta ---
+export function getLimits(){
+  const l=LS.get('bff_limits',null);
+  if(!l||typeof l!=='object') return {intensity:5,no:[],likes:[]};
+  return {intensity:Math.min(10,Math.max(1,+l.intensity||5)), no:Array.isArray(l.no)?l.no.slice(0,10):[], likes:Array.isArray(l.likes)?l.likes.slice(0,10):[]};
+}
+export function saveLimits(l){ LS.set('bff_limits', {intensity:Math.min(10,Math.max(1,+l.intensity||5)), no:(l.no||[]).slice(0,10), likes:(l.likes||[]).slice(0,10)}); }
+export function learnLimits(text){
+  const t=String(text||'');
+  const l=getLimits(); let changed=false;
+  const addNo=s=>{ s=String(s||'').replace(/[.!?¡¿,;]+$/,'').trim().slice(0,40); if(!s) return; if(!l.no.some(x=>x.toLowerCase()===s.toLowerCase())){ l.no.push(s); changed=true; } };
+  const addLike=s=>{ s=String(s||'').replace(/[.!?¡¿,;]+$/,'').trim().slice(0,40); if(!s) return; if(!l.likes.some(x=>x.toLowerCase()===s.toLowerCase())){ l.likes.push(s); changed=true; } };
+  let m;
+  if(m=t.match(/\bno me gusta (?:el |la |los |las |que )?(.{2,40})/i)) addNo(m[1]);
+  else if(/\beso no\b/i.test(t)||/\bas[ií] no\b/i.test(t)) addNo('eso');
+  if(/^\s*(para|detente|alto|basta|ya basta)\s*[.!]*\s*$/i.test(t)) addNo('seguir cuando diga "para"');
+  if(m=t.match(/\bno quiero (?:el |la |los |las |que )?(.{2,40})/i)) addNo(m[1]);
+  if(m=t.match(/\bme encanta (?:el |la |los |las |que )?(.{2,40})/i)) addLike(m[1]);
+  else if(m=t.match(/\bme gusta (?:el |la |los |las |que )?(.{2,40})/i)) addLike(m[1]);
+  if(changed) saveLimits(l);
+  return changed? l : null;
+}
+export function limitsText(){
+  const l=getLimits();
+  return `\nSus límites (respétalos SIEMPRE; juega justo al filo, sin pasarte): intensidad máxima ${l.intensity}/10; nunca: ${l.no.length?l.no.join(', '):'nada anotado'}; le gusta: ${l.likes.length?l.likes.join(', '):'nada anotado'}.`;
 }
